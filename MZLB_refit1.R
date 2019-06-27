@@ -373,6 +373,7 @@ var_name <- 'nrou'
 var_name <- 'unemp'
 var_name <- 'unemp_sa'
 var_name <- 'unemp_ns'
+raw_unemp_var_list <- c('nrou', 'unemp', 'unemp_sa', 'unemp_ns')
 
 mzlb[, 'unemp_gap_1'] <- mzlb[, 'unemp'] - mzlb[, 'nrou']
 # mzlb[, 'unemp_gap_2'] <- mzlb[, 'unemp_sa'] - mzlb[, 'nrou']
@@ -389,9 +390,57 @@ print(var_name)
 #--------------------------------------------------------------------------------
 
 # Both 20 and 30 year issues have missing data: 
-# Take average for long rate. 
+summary(mzlb[, c('tb20yr_cm', 'tb30yr_cm')])
+# The zeros are actually missing values.
+mzlb[is.na(mzlb[, 'tb20yr_cm']) | 
+       mzlb[, 'tb20yr_cm'] == 0, 'tb20yr_cm'] <- NA
+mzlb[is.na(mzlb[, 'tb30yr_cm']) | 
+       mzlb[, 'tb30yr_cm'] == 0, 'tb30yr_cm'] <- NA
+
+var_name_1 <- 'tb20yr_cm'
+var_name_2 <- 'tb30yr_cm'
+plot(mzlb[, var_name_1], type = 'l', 
+     main = sprintf('Plot of %s and %s', var_name_1, var_name_2))
+lines(mzlb[, var_name_2], col = 'blue')
+
+# So similar it doesn't make much difference. 
+# Easiest to impute missing values from each series. 
+table(is.na(mzlb[, 'tb20yr_cm']), is.na(mzlb[, 'tb30yr_cm']))
+# Only the last observation is missing in common. 
+mzlb[is.na(mzlb[, 'tb20yr_cm']), 'tb20yr_cm'] <- mzlb[is.na(mzlb[, 'tb20yr_cm']), 'tb30yr_cm']
+mzlb[is.na(mzlb[, 'tb30yr_cm']), 'tb30yr_cm'] <- mzlb[is.na(mzlb[, 'tb30yr_cm']), 'tb20yr_cm']
+
 
 # Estimate principal components to summarize data. 
+yield_curve_vars <- c("tb3mo_cm", "tb6mo_cm", "tb1yr_cm", "tb2yr_cm",     
+                 "tb3yr_cm", "tb5yr_cm", "tb7yr_cm",    
+                 "tb10yr_cm", "tb20yr_cm", "tb30yr_cm")
+summary(mzlb[1:(nrow(mzlb)-1), yield_curve_vars])
+
+
+yield_pca <- prcomp(mzlb[1:(nrow(mzlb)-1), yield_curve_vars], 
+                    center = TRUE,scale. = TRUE)
+
+summary(yield_pca)
+# The firs two carry most variation. 
+
+str(yield_pca)
+
+summary(predict(yield_pca)[, 1:2])
+
+mzlb[, c('yield_pc1', 'yield_pc2')] <- NA
+mzlb[1:(nrow(mzlb)-1), c('yield_pc1', 'yield_pc2')] <- 
+  predict(yield_pca)[, 1:2]
+
+
+
+var_name_1 <- 'yield_pc1'
+var_name_2 <- 'yield_pc2'
+plot(mzlb[, var_name_1], type = 'l', 
+     main = sprintf('Plot of %s and %s', var_name_1, var_name_2))
+lines(mzlb[, var_name_2], col = 'blue')
+
+
 
 
 #--------------------------------------------------------------------------------
@@ -400,11 +449,11 @@ print(var_name)
 
 # Omit some variables but most borderline series are acceptable. 
 
-diff_list <- c('cpi_urb_all_ns', 'cpi_urb_all_sa', 
+diff_var_list <- c('cpi_urb_all_ns', 'cpi_urb_all_sa', 
                'pcons_exp', 'wti_oil',
                'house_tot', 'house_1un', 'house_tot_ns', 'house_1un_ns')
 
-for (var_name in diff_list) {
+for (var_name in diff_var_list) {
   
   diff_var_name <- sprintf('d_%s', var_name)
   mzlb[, diff_var_name] <- c(NA, diff(mzlb[, var_name]))
@@ -412,7 +461,6 @@ for (var_name in diff_list) {
 }
 
 # Inspect transformed variables. 
-
 var_num <- 0
 
 var_num <- var_num +1
@@ -423,10 +471,22 @@ plot(mzlb[, var_name], type = 'l',
 
 
 #--------------------------------------------------------------------------------
-# List of Predictor Variables
+# List of Candidate Predictor Variables
 #--------------------------------------------------------------------------------
 
-pred_var_list <- colnames(mzlb)[c(2:31)]
+target_var <- 'fed_jump'
+
+
+# Remove variables to exclude from estimation. 
+excl_var_list <- c('date', 'vix', 'lab_mkt_cond', colnames(mzlb)[c(33:52)])
+excl_var_list <- c(excl_var_list, diff_var_list, raw_unemp_var_list)
+
+pred_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% excl_var_list)]
+
+incl_obsns <- 2:(nrow(mzlb) - 3)
+
+summary(mzlb[incl_obsns, c(target_var, pred_var_list)])
+
 
 
 ################################################################################
