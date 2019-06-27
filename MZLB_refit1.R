@@ -1,6 +1,6 @@
 ################################################################################
 # 
-# Non-causally Filtered Unit Root Tests
+# Decision Trees for the Federal Reserve Target Rate Policy
 # 
 # Lee Morin, Ph.D.
 # Assistant Professor
@@ -8,14 +8,16 @@
 # College of Business Administration
 # University of Central Florida
 # 
-# June 24, 2019
+# June 27, 2019
 # 
 ################################################################################
 # 
-# Calculation of power curves for the non-causally filtered 
-# unit root test as a function of the filter length m. 
+# Estimation of decision tree models for the target interest 
+# rate policy of the Federal Reserve. 
+# Identification is by indirect inference during zero lower bound episode. 
 # 
-# This version is designed for displaying power curves and not histograms. 
+# This version is designed for an initial data inspection 
+# and preliminary modeling with new variables and more observations. 
 # 
 # Dependencies: 
 #   None.
@@ -31,9 +33,9 @@
 rm(list=ls(all=TRUE))
 
 # Set working directory.
-# wd_path <- '/home/ec2-user/CIforAUC' # On AWS
+# wd_path <- '/home/ec2-user/MZLB-II_revisions' # On AWS
 wd_path <- 'C:/Users/le279259/Documents/Research/MZLB-II/MZLB-II_revisions' # On Windows
-# wd_path <- '~/freq_ur_tests' # On Linux
+# wd_path <- '~/MZLB-II_revisions' # On business.ucf.edu
 
 setwd(wd_path)
 
@@ -233,6 +235,46 @@ n_var <- length(var_list)
 
 
 #--------------------------------------------------------------------------------
+# Initial Inspections
+#--------------------------------------------------------------------------------
+
+# To be replaced by the unemployment gap (still highly persistent).
+var_name <- 'nrou'
+var_name <- 'unemp'
+
+
+# Obvious linear trend.
+var_name <- 'cpi_urb_all_ns' # Must be differenced.
+var_name <- 'cpi_urb_all_sa' 
+var_name <- 'pcons_exp'
+
+# Should probably be differenced.
+# Tough call because of crisis. 
+var_name <- 'house_tot'
+# Looks like linear trend with huge break.
+# Take differences.
+var_name <- 'wti_oil' # Similarly.
+
+# Note gaps in interest rate series.
+# Use constant maturity series instead of seasoned issues. 
+# (both for consistency with yield curve and to avoid gaps).
+# Both 20 and 30 year issues have missing data: 
+# Take average for long rate. 
+# Replace with principal components of the yield curve. 
+
+
+var_name <- ''
+
+var_num <- 0
+
+var_num <- var_num +1
+var_name <- var_list[var_num]
+plot(mzlb[, var_name], type = 'l', 
+     main = sprintf('Plot of %s', var_name))
+print(var_name)
+
+
+#--------------------------------------------------------------------------------
 # Unit root tests
 #--------------------------------------------------------------------------------
 
@@ -317,6 +359,74 @@ plot(mzlb[, var_name], type = 'l',
 # FFR is the target, tbills should be omitted or replaced accordingly. 
 
 
+################################################################################
+# Transformations and Data Preparation
+################################################################################
+
+
+#--------------------------------------------------------------------------------
+# Unemployment Gap
+#--------------------------------------------------------------------------------
+
+# To be replaced by the unemployment gap (still highly persistent).
+var_name <- 'nrou'
+var_name <- 'unemp'
+var_name <- 'unemp_sa'
+var_name <- 'unemp_ns'
+
+mzlb[, 'unemp_gap_1'] <- mzlb[, 'unemp'] - mzlb[, 'nrou']
+# mzlb[, 'unemp_gap_2'] <- mzlb[, 'unemp_sa'] - mzlb[, 'nrou']
+# mzlb[, 'unemp_gap_3'] <- mzlb[, 'unemp_ns'] - mzlb[, 'nrou']
+
+var_name <- 'unemp_gap_1'
+plot(mzlb[, var_name], type = 'l', 
+     main = sprintf('Plot of %s', var_name))
+print(var_name)
+
+
+#--------------------------------------------------------------------------------
+# Yield Curve
+#--------------------------------------------------------------------------------
+
+# Both 20 and 30 year issues have missing data: 
+# Take average for long rate. 
+
+# Estimate principal components to summarize data. 
+
+
+#--------------------------------------------------------------------------------
+# Differencing for Stationarity
+#--------------------------------------------------------------------------------
+
+# Omit some variables but most borderline series are acceptable. 
+
+diff_list <- c('cpi_urb_all_ns', 'cpi_urb_all_sa', 
+               'pcons_exp', 'wti_oil',
+               'house_tot', 'house_1un', 'house_tot_ns', 'house_1un_ns')
+
+for (var_name in diff_list) {
+  
+  diff_var_name <- sprintf('d_%s', var_name)
+  mzlb[, diff_var_name] <- c(NA, diff(mzlb[, var_name]))
+  
+}
+
+# Inspect transformed variables. 
+
+var_num <- 0
+
+var_num <- var_num +1
+var_name <- sprintf('d_%s', diff_list[var_num])
+plot(mzlb[, var_name], type = 'l', 
+     main = sprintf('Plot of %s', var_name))
+# All better. 
+
+
+#--------------------------------------------------------------------------------
+# List of Predictor Variables
+#--------------------------------------------------------------------------------
+
+pred_var_list <- colnames(mzlb)[c(2:31)]
 
 
 ################################################################################
