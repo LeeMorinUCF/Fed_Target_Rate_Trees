@@ -73,7 +73,8 @@ tail(fed_rates)
 plot(fed_rates[, 'DFF'], type = 'l', 
      main = 'Federal Funds Rate and Targets', 
      xlab = 'Date', 
-     ylab = 'Interest Rate')
+     ylab = 'Interest Rate', 
+     ylim = c(0,10))
 lines(fed_rates[, 'DFEDTAR'], col = 'red')
 lines(fed_rates[, 'DFEDTARU'], col = 'blue')
 lines(fed_rates[, 'DFEDTARL'], col = 'blue')
@@ -168,8 +169,10 @@ nrow(fed_monthly)
 
 # Aggregate ZLB indicator. 
 table(fed_monthly[, 'zlb_ind'], useNA = 'ifany')
-# Count both partial months as included in the ZLB indicator.
-fed_monthly[, 'zlb_ind'] <- fed_monthly[, 'zlb_ind'] > 0
+# Omit both partial months as included in the ZLB indicator.
+# For at least part of those months there was athe possibility of a rate change,
+# And, in fact, that must have occurred to make a partial month of ZLB. 
+fed_monthly[, 'zlb_ind'] <- fed_monthly[, 'zlb_ind'] >= 28
 table(fed_monthly[, 'zlb_ind'], useNA = 'ifany')
 
 
@@ -202,9 +205,15 @@ table(fed_monthly[, 'fed_chg'], fed_monthly[, 'fed_jump'], useNA = 'ifany')
 
 
 # Due to the discrete nature of the typical rate change, 
+# and the typical sequence of FOMC meetings, 
 # not much variation is lost by categorizing in this way. 
 table(fed_rates[, 'fed_jump'])
 table(fed_monthly[, 'fed_jump'])
+# Although some months include several small changes. 
+
+# Compare with ZLB indicators.
+table(fed_rates[, 'fed_jump'], fed_rates[, 'zlb_ind'], useNA = 'ifany')
+table(fed_monthly[, 'fed_jump'], fed_monthly[, 'zlb_ind'], useNA = 'ifany')
 
 
 summary(fed_rates)
@@ -224,14 +233,23 @@ plot(cumsum(as.numeric(fed_monthly[-1, 'fed_jump']) - 3), # type = 'l',
 # Mark ZLB dates as additional rate change category
 #--------------------------------------------------------------------------------
 
-fed_monthly[, 'fed_jump_zlb'] <- fed_monthly[, 'fed_jump']
-levels(fed_monthly[, 'fed_jump_zlb'])
+# Initialize new factor. 
+fed_monthly[, 'fed_jump_zlb'] <- NA
 levels(fed_monthly[, 'fed_jump_zlb']) <- c('-9', 
-                                           levels(fed_monthly[, 'fed_jump_zlb']))
+                                           levels(fed_monthly[, 'fed_jump']))
+class(fed_monthly[, 'fed_jump_zlb'])
+levels(fed_monthly[, 'fed_jump_zlb'])
 
+# Assign values according to ZLB indicator.
 fed_monthly[fed_monthly[, 'zlb_ind'], 'fed_jump_zlb'] <- '-9'
+fed_monthly[!fed_monthly[, 'zlb_ind'], 'fed_jump_zlb'] <- 
+  fed_monthly[!fed_monthly[, 'zlb_ind'], 'fed_jump']
 
+# Trust but Verify.
 table(fed_monthly[, 'fed_jump_zlb'], useNA = 'ifany')
+table(fed_monthly[, 'zlb_ind'], 
+      fed_monthly[, 'fed_jump_zlb'], useNA = 'ifany')
+# Only zero (censored) rate changes are mapped to '-9'.
 
 
 ################################################################################
@@ -273,7 +291,7 @@ tail(fed_monthly)
 nrow(mzlb)
 nrow(fed_monthly)
 
-# Simple join by adding columns as is. 
+# Simple join by appending columns as is. 
 mzlb <- cbind(mzlb, fed_monthly)
 colnames(mzlb)
 
@@ -521,7 +539,7 @@ for (var_name in diff_var_list) {
 var_num <- 0
 
 var_num <- var_num +1
-var_name <- sprintf('d_%s', diff_list[var_num])
+var_name <- sprintf('d_%s', diff_var_list[var_num])
 plot(mzlb[, var_name], type = 'l', 
      main = sprintf('Plot of %s', var_name))
 # All better. 
@@ -542,7 +560,9 @@ pred_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% excl_var_list)]
 
 
 # Remove observations with many missing variables.
-incl_obsns <- 2:(nrow(mzlb) - 3)
+# incl_obsns <- 2:(nrow(mzlb) - 3)
+incl_obsns <- 1:nrow(mzlb) %in% 2:(nrow(mzlb) - 3)
+# Logical version is more flexible. 
 
 
 # Data are ready for modelling.
@@ -557,22 +577,24 @@ summary(mzlb[incl_obsns, c(target_var, pred_var_list)])
 #--------------------------------------------------------------------------------
 # Repeat Estimation for Three Cases:
 # 1. Ignoring ZLB (as if ZLB dates are truly all zero changes).
-#   Note: Tree is only a root. 
+#   Include all observations, without ZLB indicator. 
 # 2. Excluding ZLB (dropping observations from dataset).
+#   Exclude ZLB observations (and ZLB indicator, now constant). 
 # 3. Acknowledging ZLB (adding additional category for ZLB dates).
-#   Normal tree specification. 
+#   Include all observations and include ZLB indicator. 
 #--------------------------------------------------------------------------------
 
+# Chose a Target Variable. 
 table(mzlb[, 'fed_jump'], mzlb[, 'fed_jump_zlb'], useNA = 'ifany')
 
 target_var <- 'fed_jump'
-target_var <- 'fed_jump_zlb'
+# target_var <- 'fed_jump_zlb'
 
+
+# Select observations depending on whether ZLB is ignored or excluded.
 incl_obsns <- 1:nrow(mzlb) %in% 2:(nrow(mzlb) - 3)
-
-# Select observations depending on whether ZLB is ignored.
 sel_obsns <- incl_obsns
-# sel_obsns <- incl_obsns & mzlb[, 'zlb_ind'] == FALSE
+sel_obsns <- incl_obsns & mzlb[, 'zlb_ind'] == FALSE
 
 
 #--------------------------------------------------------------------------------
@@ -622,10 +644,33 @@ drop_var_list <- c(drop_var_list, 'd_house_tot_ns', 'd_house_1un', 'd_house_1un_
 # Some variables are consistently ranked with low importance. 
 drop_var_list <- c(drop_var_list, 'vol', 'd_wti_oil', 'spx_ret', 'd_pcons_exp', 's_o_and_i')
 
+# Compare different measures of inflation. 
+plot(mzlb[incl_obsns, 'infl_sa_6m'], type = 'l')
+lines(mzlb[incl_obsns, 'fut_infl_surv'], col = 'blue')
+lines(mzlb[incl_obsns, 'infl_exp'], col = 'red')
+
+plot(mzlb[incl_obsns, 'fut_infl_surv'], 
+     mzlb[incl_obsns, 'infl_exp'])
+# Very similar. 
+plot(mzlb[incl_obsns, 'infl_sa_6m'], 
+     mzlb[incl_obsns, 'infl_exp'])
+plot(mzlb[incl_obsns, 'infl_sa_6m'], 
+     mzlb[incl_obsns, 'fut_infl_surv'])
+# Surveys contain complimentary information. 
+# Drop 'infl_exp', which is the lowest performer of the two surveys. 
+drop_var_list <- c(drop_var_list, 'infl_exp')
+
+
+#--------------------------------------------------------------------------------
+# Estimation on Current List of Candidate Predictor Variables
+#--------------------------------------------------------------------------------
 
 
 # Impose current exclusions and fit the classification tree. 
 trim_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% drop_var_list)]
+
+# Impose current exclusions but add a ZLB indicator. 
+# trim_var_list <- c(trim_var_list, 'zlb_ind')
 
 
 
@@ -650,10 +695,18 @@ plotcp(fed_tree)
 # Detailed summary of splits. 
 # summary(fed_tree) 
 
+# Display variable importance statistics. 
 fed_tree$variable.importance
 
+# Analyze predictions. 
+summary(predict(fed_tree))
+head(predict(fed_tree))
 
 
+
+#--------------------------------------------------------------------------------
+# Postestimation on a sequence of Candidate Predictor Variables
+#--------------------------------------------------------------------------------
 
 
 # Plot tree 
