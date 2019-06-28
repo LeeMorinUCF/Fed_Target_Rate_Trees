@@ -45,6 +45,9 @@ library(urca)
 # install.packages('tseries')
 library(tseries)
 
+# Load libraries to estimate classification tree with rpart.
+library(rpart)
+
 
 ################################################################################
 # Load Daily Federal Funds Rate series.
@@ -74,6 +77,29 @@ plot(fed_rates[, 'DFF'], type = 'l',
 lines(fed_rates[, 'DFEDTAR'], col = 'red')
 lines(fed_rates[, 'DFEDTARU'], col = 'blue')
 lines(fed_rates[, 'DFEDTARL'], col = 'blue')
+
+
+#--------------------------------------------------------------------------------
+# Include indicator for zero lower bound
+#--------------------------------------------------------------------------------
+
+summary(fed_rates[, 'DFEDTARL'])
+table(fed_rates[, 'DFEDTARL'] == 0, useNA = 'ifany')
+table(fed_rates[, 'DFEDTARL'] == 0, 
+      as.character(fed_rates[, 'DATE']) >= '2008-12-16', 
+      useNA = 'ifany')
+
+fed_rates[, 'zlb_ind'] <- fed_rates[, 'DFEDTARL'] == 0
+fed_rates[is.na(fed_rates[, 'DFEDTARL']), 'zlb_ind'] <- FALSE
+
+# Trust but Verify.
+table(fed_rates[, 'DFEDTARL'] == 0, 
+      fed_rates[, 'zlb_ind'], useNA = 'ifany')
+
+
+#--------------------------------------------------------------------------------
+# Analyze target rate changes
+#--------------------------------------------------------------------------------
 
 # Generate changes in variables. 
 fed_rates[, 'd_DFF'] <- c(NA, diff(fed_rates[, 'DFF']))
@@ -115,6 +141,12 @@ fed_rates[is.na(fed_rates[, 'd_DFEDTAR']) &
 fed_rates[fed_rates[, 'DATE'] %in% 
             c('2008-12-15', '2008-12-16', '2008-12-17'), ]
 
+
+#--------------------------------------------------------------------------------
+# Generate variables for target rate changes
+#--------------------------------------------------------------------------------
+
+
 # Join them into a single variable of rate changes. 
 fed_rates[, 'fed_chg'] <- NA
 fed_rates[!is.na(fed_rates[, 'd_DFEDTAR']), 'fed_chg'] <- 
@@ -126,13 +158,20 @@ fed_rates[fed_rates[, 'DATE'] == '2008-12-16', 'fed_chg'] <- -0.75
 # Aggregate by calendar month. 
 fed_rates[, 'month'] <- substr(fed_rates[, 'DATE'], 1, 7)
 class(fed_rates[, 'fed_chg'])
-fed_monthly <- aggregate(fed_rates[, 'fed_chg'], 
+fed_monthly <- aggregate(fed_rates[, c('fed_chg', 'zlb_ind')], 
                          by = list(fed_rates[, 'month']), 
                          FUN = 'sum')
-colnames(fed_monthly) <- c('month', 'fed_chg')
+colnames(fed_monthly) <- c('month', 'fed_chg', 'zlb_ind')
 summary(fed_monthly)
-table(fed_monthly[, 'fed_chg'])
+table(fed_monthly[, 'fed_chg'], useNA = 'ifany')
 nrow(fed_monthly)
+
+# Aggregate ZLB indicator. 
+table(fed_monthly[, 'zlb_ind'], useNA = 'ifany')
+# Count both partial months as included in the ZLB indicator.
+fed_monthly[, 'zlb_ind'] <- fed_monthly[, 'zlb_ind'] > 0
+table(fed_monthly[, 'zlb_ind'], useNA = 'ifany')
+
 
 # Compare the tables of counts by discrete rate change 
 # before and after aggregating by month. 
@@ -141,6 +180,11 @@ nrow(fed_monthly)
 # When there are more than one, it does not usually bump into a different category. 
 table(fed_rates[, 'fed_chg'])
 table(fed_monthly[, 'fed_chg'])
+
+
+#--------------------------------------------------------------------------------
+# Categorize target rate changes
+#--------------------------------------------------------------------------------
 
 
 # Cut the fed target rate changes into categories. 
@@ -175,6 +219,19 @@ plot(cumsum(as.numeric(fed_monthly[-1, 'fed_jump']) - 3), # type = 'l',
      ylab = 'Interest Rate Jumps')
 
 
+
+#--------------------------------------------------------------------------------
+# Mark ZLB dates as additional rate change category
+#--------------------------------------------------------------------------------
+
+fed_monthly[, 'fed_jump_zlb'] <- fed_monthly[, 'fed_jump']
+levels(fed_monthly[, 'fed_jump_zlb'])
+levels(fed_monthly[, 'fed_jump_zlb']) <- c('-9', 
+                                           levels(fed_monthly[, 'fed_jump_zlb']))
+
+fed_monthly[fed_monthly[, 'zlb_ind'], 'fed_jump_zlb'] <- '-9'
+
+table(fed_monthly[, 'fed_jump_zlb'], useNA = 'ifany')
 
 
 ################################################################################
@@ -376,8 +433,8 @@ var_name <- 'unemp_ns'
 raw_unemp_var_list <- c('nrou', 'unemp', 'unemp_sa', 'unemp_ns')
 
 mzlb[, 'unemp_gap_1'] <- mzlb[, 'unemp'] - mzlb[, 'nrou']
-# mzlb[, 'unemp_gap_2'] <- mzlb[, 'unemp_sa'] - mzlb[, 'nrou']
-# mzlb[, 'unemp_gap_3'] <- mzlb[, 'unemp_ns'] - mzlb[, 'nrou']
+mzlb[, 'unemp_gap_2'] <- mzlb[, 'unemp_sa'] - mzlb[, 'nrou']
+mzlb[, 'unemp_gap_3'] <- mzlb[, 'unemp_ns'] - mzlb[, 'nrou']
 
 var_name <- 'unemp_gap_1'
 plot(mzlb[, var_name], type = 'l', 
@@ -422,10 +479,10 @@ yield_pca <- prcomp(mzlb[1:(nrow(mzlb)-1), yield_curve_vars],
                     center = TRUE,scale. = TRUE)
 
 summary(yield_pca)
-# The firs two carry most variation. 
+# The first two carry most variation. 
 
-str(yield_pca)
-
+# Extract the predicted values of the 
+# first two principal components.
 summary(predict(yield_pca)[, 1:2])
 
 mzlb[, c('yield_pc1', 'yield_pc2')] <- NA
@@ -478,13 +535,17 @@ target_var <- 'fed_jump'
 
 
 # Remove variables to exclude from estimation. 
-excl_var_list <- c('date', 'vix', 'lab_mkt_cond', colnames(mzlb)[c(33:52)])
+excl_var_list <- c('date', 'vix', 'lab_mkt_cond', colnames(mzlb)[c(33:54)])
 excl_var_list <- c(excl_var_list, diff_var_list, raw_unemp_var_list)
 
 pred_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% excl_var_list)]
 
+
+# Remove observations with many missing variables.
 incl_obsns <- 2:(nrow(mzlb) - 3)
 
+
+# Data are ready for modelling.
 summary(mzlb[incl_obsns, c(target_var, pred_var_list)])
 
 
@@ -492,6 +553,137 @@ summary(mzlb[incl_obsns, c(target_var, pred_var_list)])
 ################################################################################
 # Model building
 ################################################################################
+
+#--------------------------------------------------------------------------------
+# Repeat Estimation for Three Cases:
+# 1. Ignoring ZLB (as if ZLB dates are truly all zero changes).
+#   Note: Tree is only a root. 
+# 2. Excluding ZLB (dropping observations from dataset).
+# 3. Acknowledging ZLB (adding additional category for ZLB dates).
+#   Normal tree specification. 
+#--------------------------------------------------------------------------------
+
+table(mzlb[, 'fed_jump'], mzlb[, 'fed_jump_zlb'], useNA = 'ifany')
+
+target_var <- 'fed_jump'
+target_var <- 'fed_jump_zlb'
+
+incl_obsns <- 1:nrow(mzlb) %in% 2:(nrow(mzlb) - 3)
+
+# Select observations depending on whether ZLB is ignored.
+sel_obsns <- incl_obsns
+# sel_obsns <- incl_obsns & mzlb[, 'zlb_ind'] == FALSE
+
+
+#--------------------------------------------------------------------------------
+# Repeat Estimation on a sequence of Candidate Predictor Variables
+#--------------------------------------------------------------------------------
+
+
+# Start with entire list. 
+drop_var_list <- c(excl_var_list)
+
+
+# Make quick exclusions on variables with close surrogates. 
+
+# Remove vxo and keep vol for volatility. 
+drop_var_list <- c(drop_var_list, 'vxo')
+
+# Remove duplicate unemployment gap.
+drop_var_list <- c(drop_var_list, 'unemp_gap_2', 'unemp_gap_3')
+
+# Remove alternate inflation variables.
+plot(mzlb[incl_obsns, 'infl_sa_6m'], type = 'l')
+lines(mzlb[incl_obsns, 'infl_sa_ann_1'], col = 'blue') # Similar
+lines(mzlb[incl_obsns, 'infl_sa_ann_2'], col = 'red') # Noisier
+lines(mzlb[incl_obsns, 'fut_infl_surv'], col = 'green') # Different. 
+drop_var_list <- c(drop_var_list, 'infl_sa_ann_1', 'infl_sa_ann_2')
+
+# Compare leading indicators.
+plot(mzlb[incl_obsns, 'lead_ind_adj'], type = 'l')
+lines(mzlb[incl_obsns, 'lead_ind_norm'], col = 'blue') # Almost identical
+lines(mzlb[incl_obsns, 'lead_ind_gdp'], col = 'red') # Smoothed and lagged
+drop_var_list <- c(drop_var_list, 'lead_ind_norm', 'lead_ind_gdp')
+
+
+# Compare changes in inflation. 
+plot(mzlb[incl_obsns, 'd_cpi_urb_all_ns'], 
+     mzlb[incl_obsns, 'd_cpi_urb_all_sa']) # Highly correlated. 
+drop_var_list <- c(drop_var_list, 'd_cpi_urb_all_ns', 'd_cpi_urb_all_sa')
+
+# Compare changes in housing start variables. 
+# Compare leading indicators.
+plot(mzlb[incl_obsns, 'd_house_tot_ns'], type = 'l')
+lines(mzlb[incl_obsns, 'd_house_1un'], col = 'blue')
+lines(mzlb[incl_obsns, 'd_house_1un_ns'], col = 'red')
+# All are very noisy and rank low in variable importance. 
+drop_var_list <- c(drop_var_list, 'd_house_tot_ns', 'd_house_1un', 'd_house_1un_ns')
+
+# Some variables are consistently ranked with low importance. 
+drop_var_list <- c(drop_var_list, 'vol', 'd_wti_oil', 'spx_ret', 'd_pcons_exp', 's_o_and_i')
+
+
+
+# Impose current exclusions and fit the classification tree. 
+trim_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% drop_var_list)]
+
+
+
+# Specify model equation.
+fmla_string <- sprintf('%s ~ %s', target_var, 
+                       paste(trim_var_list, collapse = " + "))
+
+fmla <- as.formula(fmla_string)
+
+
+# Grow initial tree 
+
+fed_tree <- rpart(fmla,
+             method = "class", data = mzlb[sel_obsns, ])
+
+# Display the summary statistics for splits.
+printcp(fed_tree)  
+
+# Visualize cross-validation results.
+plotcp(fed_tree)
+
+# Detailed summary of splits. 
+# summary(fed_tree) 
+
+fed_tree$variable.importance
+
+
+
+
+
+# Plot tree 
+plot(fed_tree, uniform = TRUE, 
+     main = "Classification Tree for Federal Reserve Target Rate")
+text(fed_tree, use.n = TRUE, all = TRUE, cex=.8)
+
+# Create attractive postscript plot of tree 
+fig_file_name <- sprintf('MZLB_tree_0.ps')
+post(fed_tree, file = fig_file_name, 
+     title = "Classification Tree for Federal Reserve Target Rate")
+# Hard to read. Lots of overlap.
+
+
+
+# Prune tree.
+fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"]
+
+pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"])
+# pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[3,"CP"])
+
+
+
+printcp(pr_fed_tree)  
+pr_fed_tree$variable.importance
+
+# Plot tree 
+plot(pr_fed_tree, uniform = TRUE, 
+     main = "Classification Tree for Federal Reserve Target Rate")
+text(pr_fed_tree, use.n = TRUE, all = TRUE, cex=.8)
 
 
 
