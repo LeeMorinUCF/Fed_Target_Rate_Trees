@@ -865,6 +865,12 @@ dev.off()
 
 # Plot leaf node number to assess variability. 
 plot(pr_fed_tree$where, type = 'l')
+lines(mzlb[, 'zlb_ind']*10 + min(pr_fed_tree$where), col = 'blue')
+
+# For ExclZLB, save this tree for indirect inference.
+if (sel_case == 'ExclZLB') {
+  ExclZLB_fed_tree <- pr_fed_tree
+} 
 
 #--------------------------------------------------------------------------------
 # Calculate Predictions
