@@ -465,6 +465,14 @@ plot(mzlb[, var_name], type = 'l',
 print(var_name)
 
 
+# Plot with the ZLB indicator.
+lines(mzlb[, 'zlb_ind']*2, col = 'blue')
+
+# mzlb[mzlb[, 'zlb_ind'] & mzlb[, 'unemp_gap_1'] > 2, 'unemp_gap_1']
+# mzlb[mzlb[, 'zlb_ind'] & mzlb[, 'unemp_gap_1'] > 2, 'date']
+# (1:nrow(mzlb))[mzlb[, 'zlb_ind'] & mzlb[, 'unemp_gap_1'] > 2]
+# mzlb[340, 'date']
+
 #--------------------------------------------------------------------------------
 # Yield Curve
 #--------------------------------------------------------------------------------
@@ -731,14 +739,18 @@ if (sel_case == 'ExclZLB') {
   
   target_var <- 'fed_jump'
   sel_obsns <- incl_obsns
+  # sel_obsns <- incl_obsns & cumsum(mzlb[, 'zlb_ind']) == 0 | mzlb[, 'zlb_ind'] 
+  # zlb_excl_obsns <- 1:nrow(mzlb) %in% 2:330
+  # sel_obsns <- incl_obsns & zlb_excl_obsns 
   estn_var_list <- pred_var_list
   
-} else if (sel_case == 'IgnZLB') {
+} else if (sel_case == 'AcknZLB') {
   
   target_var <- 'fed_jump_zlb'
   sel_obsns <- incl_obsns
   # Add a ZLB indicator to identify censored observations at ZLB.
-  estn_var_list <- c(pred_var_list, 'zlb_ind')
+  # estn_var_list <- c(pred_var_list, 'zlb_ind')
+  estn_var_list <- c(pred_var_list)
   
 }
 
@@ -749,7 +761,7 @@ if (sel_case == 'ExclZLB') {
 
 # Specify model equation.
 fmla_string <- sprintf('%s ~ %s', target_var, 
-                       paste(pred_var_list, collapse = " + "))
+                       paste(estn_var_list, collapse = " + "))
 
 fmla <- as.formula(fmla_string)
 
@@ -771,7 +783,8 @@ fed_tree <- rpart(fmla,
                                           # minsplit = 20, 
                                           # minbucket = 7, 
                                           # cp = 0.02, 
-                                          cp = 0.01, 
+                                          # cp = 0.023089,
+                                          cp = 0.01,
                                           maxcompete = 4, 
                                           maxsurrogate = 5, 
                                           usesurrogate = 2, 
@@ -789,7 +802,7 @@ print(rand_seed)
 
 # Detailed summary of splits. 
 # summary(fed_tree) 
-# Verbose, but useful to learn abour surrogate splits. 
+# Verbose, but useful to learn about surrogate splits. 
 
 # Display variable importance statistics. 
 fed_tree$variable.importance
@@ -808,8 +821,23 @@ head(predict(fed_tree))
 # Prune tree by minimum cross-validation error.
 fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"]
 
+# Selected complexity parameter by case (there are ties). 
+if (sel_case == 'ExclZLB') {
+  sel_cp_min <- fed_tree$cptable[2,"CP"]
+} else if (sel_case == 'AcknZLB') {
+  # sel_cp_min <- fed_tree$cptable[3,"CP"] # With ZLB flag
+  sel_cp_min <- fed_tree$cptable[4,"CP"] # Without (two options)
+  sel_cp_min <- fed_tree$cptable[5,"CP"]
+}  else if (sel_case == 'IgnZLB') {
+  # sel_cp_min <- fed_tree$cptable[3,"CP"]
+  sel_cp_min <- 0.023
+} 
+
+# Mechanical approach: 
 # pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"])
-pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[2,"CP"])
+# pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[2,"CP"])
+# Selected by model: 
+pr_fed_tree<- prune(fed_tree, cp = sel_cp_min)
 
 # Output results of pruned tree. 
 printcp(pr_fed_tree)  
@@ -823,7 +851,9 @@ pr_fed_tree$variable.importance
 #--------------------------------------------------------------------------------
 
 # Save it for TeX file.
-fig_file_name <- sprintf('%s/MZLBtree%s1.pdf', fig_path, sel_case)
+fig_version <- 2
+fig_file_name <- sprintf('%s/MZLBtree%s%d.pdf', 
+                         fig_path, sel_case, fig_version)
 pdf(fig_file_name)
 rpart.plot(pr_fed_tree, type = 2, 
            cex = 0.65, tweak = 0.95, 
@@ -841,7 +871,7 @@ plot(pr_fed_tree$where, type = 'l')
 #--------------------------------------------------------------------------------
 
 # Obtain predictions of class probabilities. 
-prob_class <- sprintf('prob_%s', levels(mzlb[, 'fed_jump']))
+prob_class <- sprintf('prob_%s', levels(mzlb[, target_var]))
 mzlb[, prob_class] <- NA
 mzlb[, prob_class] <- predict(fed_tree, newdata = mzlb)
 
@@ -892,13 +922,16 @@ tail(mzlb[, c(prob_class, 'pred_max_prob')])
 # Compare most probable class with expected jump size.
 plot(mzlb[, 'pred_jump'], 
      mzlb[, 'pred_class'])
-# Almost collinear. 
+# Almost collinear, aside from ZLB. 
 
 
 # Plot time series of expected jump size. 
 plot(mzlb[, 'pred_jump'], type = 'l')
 # Time series of mean jump size. 
-plot(cumsum(mzlb[, 'pred_jump']) + mzlb[1, 'eff_ffr'] - 2.5, 
+adj_eff_ffr <- 2.5 # ExclZLB
+adj_eff_ffr <- 1.5 # IgnZLB (and AcknZLB for now)
+adj_eff_ffr <- 2.5 # AcknZLB
+plot(cumsum(mzlb[, 'pred_jump']) + mzlb[1, 'eff_ffr'] - adj_eff_ffr, 
      type = 'l', ylim = c(0,12))
 lines(mzlb[, 'eff_ffr'], col = 'blue')
 # Compare with accumulated LSAPs. 
@@ -909,6 +942,8 @@ lines(mzlb[, 'eff_ffr'], col = 'blue')
 lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
         (range_soma[2] - range_soma[1]), col = 'red')
 # As expected, the ExclZLB model does not predict well on the ZLB period. 
+# Likewise, the AcknZLB model predicts zeros on the ZLB period, 
+# which is a placeholder waiting for the predictions from indirect inference. 
 
 
 
@@ -932,11 +967,14 @@ plot(mzlb[, 'pred_jump'],
 conf_mat <- table(mzlb[sel_obsns, target_var], 
                   mzlb[sel_obsns, 'pred_class'], useNA = 'ifany')
 
-
+# Correction for incorrect class names in AcknZLB case 
+# rownames(conf_mat) <- c('-9', '-2', '-1', '0', '1', '2')
 
 pct_correct <- sum(mzlb[sel_obsns, target_var] == 
                      mzlb[sel_obsns, 'pred_class'], na.rm = TRUE) / 
   sum(!is.na(mzlb[sel_obsns, target_var]))
+
+
 
 # Compare with the null model: Always zero (most frequent class).
 pct_zero <- sum(mzlb[sel_obsns, target_var] == 0, na.rm = TRUE) / 
@@ -945,21 +983,30 @@ pct_zero <- sum(mzlb[sel_obsns, target_var] == 0, na.rm = TRUE) /
 
 # Store this confusion matrix for this model case.
 conf_mat_name <- sprintf('conf_mat_%s', sel_case)
+# Reorder columns.
 conf_mat_cols <- levels(mzlb[, 'pred_class'])[levels(mzlb[, 'pred_class']) %in% 
                                                 colnames(conf_mat)]
 assign(conf_mat_name, conf_mat[, conf_mat_cols])
 
 
+# Fix pct_correct for AcknZLB case.
+# pct_correct <- sum(diag(conf_mat_AcknZLB))/sum(sum(conf_mat_AcknZLB))
+
 # Store correct prediction as well. 
-pct_zero_name <- sprintf('pct_zero_%s', sel_case)
-assign(pct_zero_name, pct_zero)
+pct_correct_name <- sprintf('pct_correct_%s', sel_case)
+assign(pct_correct_name, pct_correct)
 
 
 
 # Test:
 # conf_mat_ExclZLB
-# pct_zero_ExclZLB
-
+# pct_correct_ExclZLB
+# conf_mat_AcknZLB
+# conf_mat_AcknZLB_orig
+# pct_correct_AcknZLB
+# conf_mat_IgnZLB
+# pct_correct_IgnZLB
+# pct_zero
 
 
 ################################################################################
