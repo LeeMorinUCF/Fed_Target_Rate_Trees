@@ -39,6 +39,9 @@ wd_path <- 'C:/Users/le279259/Documents/Research/MZLB-II/MZLB-II_revisions' # On
 
 setwd(wd_path)
 
+# Set path for saved figures.
+fig_path <- 'MZLB_figs'
+
 # Load libraries designed for nonstationary time series.
 # install.packages('urca')
 library(urca)
@@ -46,8 +49,10 @@ library(urca)
 library(tseries)
 
 # Load libraries to estimate classification tree with rpart.
+# install.packages('rpart')
 library(rpart)
-
+# install.packages('rpart.plot')
+library(rpart.plot)
 
 ################################################################################
 # Load Daily Federal Funds Rate series.
@@ -559,7 +564,7 @@ excl_var_list <- c(excl_var_list, diff_var_list, raw_unemp_var_list)
 pred_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% excl_var_list)]
 
 
-# Remove observations with many missing variables.
+# Remove head and tail observations with many missing variables.
 # incl_obsns <- 2:(nrow(mzlb) - 3)
 incl_obsns <- 1:nrow(mzlb) %in% 2:(nrow(mzlb) - 3)
 # Logical version is more flexible. 
@@ -569,32 +574,9 @@ incl_obsns <- 1:nrow(mzlb) %in% 2:(nrow(mzlb) - 3)
 summary(mzlb[incl_obsns, c(target_var, pred_var_list)])
 
 
-
 ################################################################################
-# Model building
+# Preliminary Model building
 ################################################################################
-
-#--------------------------------------------------------------------------------
-# Repeat Estimation for Three Cases:
-# 1. Ignoring ZLB (as if ZLB dates are truly all zero changes).
-#   Include all observations, without ZLB indicator. 
-# 2. Excluding ZLB (dropping observations from dataset).
-#   Exclude ZLB observations (and ZLB indicator, now constant). 
-# 3. Acknowledging ZLB (adding additional category for ZLB dates).
-#   Include all observations and include ZLB indicator. 
-#--------------------------------------------------------------------------------
-
-# Chose a Target Variable. 
-table(mzlb[, 'fed_jump'], mzlb[, 'fed_jump_zlb'], useNA = 'ifany')
-
-target_var <- 'fed_jump'
-# target_var <- 'fed_jump_zlb'
-
-
-# Select observations depending on whether ZLB is ignored or excluded.
-incl_obsns <- 1:nrow(mzlb) %in% 2:(nrow(mzlb) - 3)
-sel_obsns <- incl_obsns
-sel_obsns <- incl_obsns & mzlb[, 'zlb_ind'] == FALSE
 
 
 #--------------------------------------------------------------------------------
@@ -639,7 +621,7 @@ plot(mzlb[incl_obsns, 'd_house_tot_ns'], type = 'l')
 lines(mzlb[incl_obsns, 'd_house_1un'], col = 'blue')
 lines(mzlb[incl_obsns, 'd_house_1un_ns'], col = 'red')
 # All are very noisy and rank low in variable importance. 
-drop_var_list <- c(drop_var_list, 'd_house_tot_ns', 'd_house_1un', 'd_house_1un_ns')
+drop_var_list <- c(drop_var_list, 'd_house_tot', 'd_house_tot_ns', 'd_house_1un', 'd_house_1un_ns')
 
 # Some variables are consistently ranked with low importance. 
 drop_var_list <- c(drop_var_list, 'vol', 'd_wti_oil', 'spx_ret', 'd_pcons_exp', 's_o_and_i')
@@ -660,88 +642,389 @@ plot(mzlb[incl_obsns, 'infl_sa_6m'],
 # Drop 'infl_exp', which is the lowest performer of the two surveys. 
 drop_var_list <- c(drop_var_list, 'infl_exp')
 
+# Compare indices of consumner sentiment. 
+plot(mzlb[incl_obsns, 'cons_conf_surv'], 
+     mzlb[incl_obsns, 'cons_sent'])
+# They're almost collinear.  
+drop_var_list <- c(drop_var_list, 'cons_conf_surv')
+
+
+# Of the yield curve, the second principal component is more important. 
+# A twisting of the yield curve is more important than the level. 
+drop_var_list <- c(drop_var_list, 'yield_pc1')
+
+# Smoothed recession probabilities use forward-looking information. 
+# This is in contrast to real-time recession probabilities, 
+# which are based on only currently available information. 
+drop_var_list <- c(drop_var_list, 'rec_prob')
+
+# Policy Uncertainty index is the next least predictive variable. 
+drop_var_list <- c(drop_var_list, 'pol_unc')
+
 
 #--------------------------------------------------------------------------------
-# Estimation on Current List of Candidate Predictor Variables
+# Generating Lags of Remaining Candidate Predictor Variables
 #--------------------------------------------------------------------------------
-
 
 # Impose current exclusions and fit the classification tree. 
 trim_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% drop_var_list)]
 
-# Impose current exclusions but add a ZLB indicator. 
-# trim_var_list <- c(trim_var_list, 'zlb_ind')
+for (var_name in trim_var_list) {
+  
+  # First lag.
+  lag_var_name <- sprintf('l1_%s', var_name)
+  mzlb[, lag_var_name] <- c(NA, mzlb[-nrow(mzlb), var_name])
+  
+  # Second lag.
+  lag_var_name <- sprintf('l2_%s', var_name)
+  mzlb[, lag_var_name] <- c(NA, NA, mzlb[-c(nrow(mzlb)-1, nrow(mzlb)), var_name])
+  
+}
+head(mzlb[, c(trim_var_list[1], sprintf('l1_%s', trim_var_list[1]), 
+              sprintf('l2_%s', trim_var_list[1]))])
 
 
+#--------------------------------------------------------------------------------
+# Specification of Final List of Candidate Predictor Variables
+#--------------------------------------------------------------------------------
+
+
+# Include the chosen number of lags of variables. 
+# pred_var_list <- c(trim_var_list, 
+#                    sprintf('l1_%s', trim_var_list))
+pred_var_list <- c(trim_var_list,
+                   sprintf('l1_%s', trim_var_list),
+                   sprintf('l2_%s', trim_var_list))
+
+
+################################################################################
+# Final Model building
+################################################################################
+
+#--------------------------------------------------------------------------------
+# Repeat Estimation for Three Cases:
+# 1. Ignoring ZLB (as if ZLB dates are truly all zero changes).
+#   Include all observations, without ZLB indicator. 
+# 2. Excluding ZLB (dropping observations from dataset).
+#   Exclude ZLB observations (and ZLB indicator, now constant). 
+# 3. Acknowledging ZLB (adding additional category for ZLB dates).
+#   Include all observations and include ZLB indicator. 
+#--------------------------------------------------------------------------------
+
+# Chose a Target Variable. 
+table(mzlb[, 'fed_jump'], mzlb[, 'fed_jump_zlb'], useNA = 'ifany')
+
+
+# Select target and observations depending on whether ZLB is ignored or excluded.
+
+sel_case <- 'ExclZLB'
+# sel_case <- 'IgnZLB'
+# sel_case <- 'AcknZLB'
+
+if (sel_case == 'ExclZLB') {
+  
+  target_var <- 'fed_jump'
+  sel_obsns <- incl_obsns & mzlb[, 'zlb_ind'] == FALSE
+  estn_var_list <- pred_var_list
+  
+} else if (sel_case == 'IgnZLB') {
+  
+  target_var <- 'fed_jump'
+  sel_obsns <- incl_obsns
+  estn_var_list <- pred_var_list
+  
+} else if (sel_case == 'IgnZLB') {
+  
+  target_var <- 'fed_jump_zlb'
+  sel_obsns <- incl_obsns
+  # Add a ZLB indicator to identify censored observations at ZLB.
+  estn_var_list <- c(pred_var_list, 'zlb_ind')
+  
+}
+
+
+#--------------------------------------------------------------------------------
+# Estimation of Chosen Case of Classification Tree Model (specified by sel_case)
+#--------------------------------------------------------------------------------
 
 # Specify model equation.
 fmla_string <- sprintf('%s ~ %s', target_var, 
-                       paste(trim_var_list, collapse = " + "))
+                       paste(pred_var_list, collapse = " + "))
 
 fmla <- as.formula(fmla_string)
 
 
 # Grow initial tree 
 
+# rand_seed <- round(runif(1)*1000)
+# 862, 851, 63, 388, 226 # With default control.
+# 443, 914 (split 12, bucket 3, xval 10)
+rand_seed <- 914
+set.seed(rand_seed)
+# fed_tree <- rpart(fmla,
+#              method = "class", data = mzlb[sel_obsns, ])
 fed_tree <- rpart(fmla,
-             method = "class", data = mzlb[sel_obsns, ])
+                  method = "class", 
+                  data = mzlb[sel_obsns, ], 
+                  control = rpart.control(minsplit = 12, # 1 year
+                                          minbucket = 3, # 1 quarter
+                                          # minsplit = 20, 
+                                          # minbucket = 7, 
+                                          # cp = 0.02, 
+                                          cp = 0.01, 
+                                          maxcompete = 4, 
+                                          maxsurrogate = 5, 
+                                          usesurrogate = 2, 
+                                          # xval = 3,
+                                          xval = 10,
+                                          surrogatestyle = 0, 
+                                          maxdepth = 30))
 
 # Display the summary statistics for splits.
 printcp(fed_tree)  
 
 # Visualize cross-validation results.
 plotcp(fed_tree)
+print(rand_seed)
 
 # Detailed summary of splits. 
 # summary(fed_tree) 
+# Verbose, but useful to learn abour surrogate splits. 
 
 # Display variable importance statistics. 
 fed_tree$variable.importance
 
 # Analyze predictions. 
-summary(predict(fed_tree))
+summary(predict(fed_tree, newdata = mzlb, prob = 'class'))
+summary(predict(fed_tree, newdata = mzlb, prob = 'prob'))
+summary(predict(fed_tree, newdata = mzlb, prob = 'vector'))
 head(predict(fed_tree))
 
 
-
 #--------------------------------------------------------------------------------
-# Postestimation on a sequence of Candidate Predictor Variables
+# Postestimation
 #--------------------------------------------------------------------------------
 
-
-# Plot tree 
-plot(fed_tree, uniform = TRUE, 
-     main = "Classification Tree for Federal Reserve Target Rate")
-text(fed_tree, use.n = TRUE, all = TRUE, cex=.8)
-
-# Create attractive postscript plot of tree 
-fig_file_name <- sprintf('MZLB_tree_0.ps')
-post(fed_tree, file = fig_file_name, 
-     title = "Classification Tree for Federal Reserve Target Rate")
-# Hard to read. Lots of overlap.
-
-
-
-# Prune tree.
+# Prune tree by minimum cross-validation error.
 fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"]
 
-pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"])
-# pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[3,"CP"])
+# pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"])
+pr_fed_tree<- prune(fed_tree, cp = fed_tree$cptable[2,"CP"])
 
-
-
+# Output results of pruned tree. 
 printcp(pr_fed_tree)  
+
 pr_fed_tree$variable.importance
 
-# Plot tree 
-plot(pr_fed_tree, uniform = TRUE, 
-     main = "Classification Tree for Federal Reserve Target Rate")
-text(pr_fed_tree, use.n = TRUE, all = TRUE, cex=.8)
 
+
+#--------------------------------------------------------------------------------
+# Plot tree 
+#--------------------------------------------------------------------------------
+
+# Save it for TeX file.
+fig_file_name <- sprintf('%s/MZLBtree%s1.pdf', fig_path, sel_case)
+pdf(fig_file_name)
+rpart.plot(pr_fed_tree, type = 2, 
+           cex = 0.65, tweak = 0.95, 
+           yesno = 2, leaf.round = 0, 
+           extra = 1, 
+           legend.x = 20)
+dev.off()
+
+
+# Plot leaf node number to assess variability. 
+plot(pr_fed_tree$where, type = 'l')
+
+#--------------------------------------------------------------------------------
+# Calculate Predictions
+#--------------------------------------------------------------------------------
+
+# Obtain predictions of class probabilities. 
+prob_class <- sprintf('prob_%s', levels(mzlb[, 'fed_jump']))
+mzlb[, prob_class] <- NA
+mzlb[, prob_class] <- predict(fed_tree, newdata = mzlb)
+
+# Initialize variables for expected jumps, predicted classes and their probabilities. 
+mzlb[, 'pred_jump'] <- 0
+mzlb[, 'pred_class'] <- '-9' # Initialize with dummy ZLB class. 
+levels(mzlb[, 'pred_class']) <- c('-9', levels(mzlb[, 'fed_jump']))
+# Fixed, regardless of target.
+
+# Current maximum probability of class, 
+# to be replaced with true max probability of class. 
+mzlb[, 'pred_max_prob'] <- 0
+
+# Translate class number into jump size. 
+if (target_var == 'fed_jump_zlb') {
+  jump_values <- c(0, 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0))
+} else {
+  jump_values <- 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0)
+}
+
+for (class_num in 1:length(prob_class)) {
+  
+  # Calculate the expected jump size. 
+  mzlb[, 'pred_jump'] <- mzlb[, 'pred_jump'] + 
+    jump_values[class_num]*mzlb[, prob_class[class_num]]
+  
+  # Determine which rows have a new high probability for this class.
+  pred_class_tag <- levels(mzlb[, target_var])[class_num]
+  new_high_prob_class <- mzlb[, prob_class[class_num]] >  mzlb[, 'pred_max_prob']
+  
+  # Label the predicted class, by maximum probability. 
+  mzlb[new_high_prob_class, 'pred_class'] <- pred_class_tag
+  
+  # Update maximum probability.
+  mzlb[new_high_prob_class, 'pred_max_prob'] <- 
+    mzlb[new_high_prob_class, prob_class[class_num]]
+  
+}
+
+# Verify calculations. 
+summary(mzlb[, prob_class]) # Probabilities
+summary(mzlb[, 'pred_jump']) # Within [-0.5, 0.5]
+
+# Verify correct maximum class probability. 
+head(mzlb[, c(prob_class, 'pred_max_prob')])
+tail(mzlb[, c(prob_class, 'pred_max_prob')])
+
+# Compare most probable class with expected jump size.
+plot(mzlb[, 'pred_jump'], 
+     mzlb[, 'pred_class'])
+# Almost collinear. 
+
+
+# Plot time series of expected jump size. 
+plot(mzlb[, 'pred_jump'], type = 'l')
+# Time series of mean jump size. 
+plot(cumsum(mzlb[, 'pred_jump']) + mzlb[1, 'eff_ffr'] - 2.5, 
+     type = 'l', ylim = c(0,12))
+lines(mzlb[, 'eff_ffr'], col = 'blue')
+# Compare with accumulated LSAPs. 
+# plot(mzlb[, 'soma_hold'], type = 'l')
+# range_soma <- range(mzlb[, 'soma_hold'], na.rm = TRUE)
+# plot((mzlb[, 'soma_hold'] - range_soma[1]) / 
+#        (range_soma[2] - range_soma[1]), type = 'l')
+lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
+        (range_soma[2] - range_soma[1]), col = 'red')
+# As expected, the ExclZLB model does not predict well on the ZLB period. 
+
+
+
+# Store expected jumps and class predictions by model. 
+mzlb[, sprintf('pred_jump_%s', sel_case)] <- mzlb[, 'pred_jump']
+mzlb[, sprintf('pred_class_%s', sel_case)] <- mzlb[, 'pred_class']
+
+
+#--------------------------------------------------------------------------------
+# Calculate Measures of Accuracy
+#--------------------------------------------------------------------------------
+
+
+# First, visualize the predictions and actuals.
+plot(mzlb[, 'pred_jump'], 
+     0.25*(as.integer(mzlb[, 'fed_jump']) - 3))
+# A positive slope is good.
+
+
+# A confusion matrix gives some numbers.
+conf_mat <- table(mzlb[sel_obsns, target_var], 
+                  mzlb[sel_obsns, 'pred_class'], useNA = 'ifany')
+
+
+
+pct_correct <- sum(mzlb[sel_obsns, target_var] == 
+                     mzlb[sel_obsns, 'pred_class'], na.rm = TRUE) / 
+  sum(!is.na(mzlb[sel_obsns, target_var]))
+
+# Compare with the null model: Always zero (most frequent class).
+pct_zero <- sum(mzlb[sel_obsns, target_var] == 0, na.rm = TRUE) / 
+  sum(!is.na(mzlb[sel_obsns, target_var]))
+
+
+# Store this confusion matrix for this model case.
+conf_mat_name <- sprintf('conf_mat_%s', sel_case)
+conf_mat_cols <- levels(mzlb[, 'pred_class'])[levels(mzlb[, 'pred_class']) %in% 
+                                                colnames(conf_mat)]
+assign(conf_mat_name, conf_mat[, conf_mat_cols])
+
+
+# Store correct prediction as well. 
+pct_zero_name <- sprintf('pct_zero_%s', sel_case)
+assign(pct_zero_name, pct_zero)
+
+
+
+# Test:
+# conf_mat_ExclZLB
+# pct_zero_ExclZLB
 
 
 
 ################################################################################
 # End
 ################################################################################
+
+
+# Iterations on plotting and output options.
+
+# Plot tree 
+# plot(fed_tree, uniform = TRUE)
+# text(fed_tree, use.n = TRUE, all = TRUE, cex=.8)
+
+# Create attractive postscript plot of tree 
+# fig_file_name <- sprintf('MZLB_tree_0.ps')
+# post(fed_tree, file = fig_file_name, 
+#      title = "Classification Tree for Federal Reserve Target Rate")
+# Hard to read. Lots of overlap.
+
+
+
+# 
+# # Plot tree 
+# # plot(pr_fed_tree, uniform = TRUE, 
+# #      main = "Classification Tree for Federal Reserve Target Rate")
+# plot(pr_fed_tree, uniform = TRUE)
+# text(pr_fed_tree, use.n = TRUE, all = TRUE, cex=.8)
+# # text(pr_fed_tree, use.n = TRUE, all = TRUE)
+# 
+# # Plot tree with rpart.plot package instead.
+# rpart.plot(pr_fed_tree)
+# 
+# rpart.plot(pr_fed_tree, type = 5, cex = 0.6, uniform = TRUE)
+# # Good:
+# rpart.plot(pr_fed_tree, type = 5, 
+#            cex = 0.6, uniform = TRUE, tweak = 0.9, 
+#            leaf.round = 0)
+# 
+# 
+# rpart.plot(pr_fed_tree, type = 4, cex = 0.6)
+# rpart.plot(pr_fed_tree, type = 0, cex = 0.75)
+# 
+# rpart.plot(pr_fed_tree, type = 2, cex = 0.55)
+# 
+# # Good:
+# rpart.plot(pr_fed_tree, type = 2, 
+#            cex = 0.675, tweak = 0.8, 
+#            yesno = 2, leaf.round = 0)
+# 
+# # Best so far:
+# rpart.plot(pr_fed_tree, type = 2, 
+#            cex = 0.725, tweak = 1.0, 
+#            yesno = 2, leaf.round = 0, 
+#            extra = 1, 
+#            legend.x = 20)
+# 
+# # Save it for TeX file.
+# fig_file_name <- sprintf('%s/MZLBtree%s1.pdf', fig_path, sel_case)
+# pdf(fig_file_name)
+# rpart.plot(pr_fed_tree, type = 2, 
+#            cex = 0.65, tweak = 0.95, 
+#            yesno = 2, leaf.round = 0, 
+#            extra = 1, 
+#            legend.x = 20)
+# dev.off()
+
+
 
