@@ -139,7 +139,10 @@ table(mzlb[, sprintf('pred_jump_%s', sel_case)],
 # Should remain negative while ZLB is in effect. 
 #   => penalty only from predicted target rate above zero. 
 
-# Calculate distance function. 
+# First need to calculate expected jump sizes and expected target rates. 
+
+
+# Calculate inputs to distance function. 
 
 # Parameters are probabilities of -0.5 and -0.25 rate cuts, respectively. 
 est_cens_probs <- c(0.10, 0.25) 
@@ -168,9 +171,99 @@ lines(mzlb[, 'fed_funds'], col = 'blue')
 lines(mzlb[, 'shadow_rate'], col = 'green')
 lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
         (range_soma[2] - range_soma[1]), col = 'red')
+# That was for a pre-specified value of the censored probabilities. 
 
 
-table(mzlb[, 'est_cens_pred_jump'] == mzlb[, 'pred_jump'])
+
+#--------------------------------------------------------------------------------
+# Calculate distance function. 
+#--------------------------------------------------------------------------------
+
+# Calculate difference from target rate after ZLB liftoff. 
+
+summary(mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1 & 
+               !mzlb[, 'zlb_ind'], 'est_cens_target_rate'])
+
+# Create index for post-ZLB period. 
+mzlb[, 'post_zlb_ind'] <- cumsum(mzlb[, 'zlb_ind']) >= 1 & 
+  !mzlb[, 'zlb_ind']
+mzlb[nrow(mzlb), 'post_zlb_ind'] <- FALSE
+
+post_ZLB_dist <- sum((mzlb[mzlb[, 'post_zlb_ind'], 'est_cens_target_rate'] - 
+                        mzlb[mzlb[, 'post_zlb_ind'], 'fed_funds'])^2)
+
+
+
+# Calculate one-sided difference from predicted target rate above zero. 
+in_ZLB_dist <- sum(mzlb[mzlb[, 'zlb_ind'] & 
+                          mzlb[, 'est_cens_target_rate'] > 0, 'est_cens_target_rate']^2)
+
+distance <- in_ZLB_dist + post_ZLB_dist
+
+
+
+#--------------------------------------------------------------------------------
+# Create a function for optimization. 
+#--------------------------------------------------------------------------------
+
+cens_zlb_dist <- function(est_cens_probs) {
+  
+  distance <- 0
+  
+  # Calculate expected rate cuts over censored ZLB class period. 
+  mzlb[, 'est_cens_pred_jump'] <- mzlb[, 'pred_jump_ExclZLB']
+  mzlb[mzlb[, 'cens_class_ind'], 'est_cens_pred_jump'] <- NA
+  mzlb[mzlb[, 'cens_class_ind'], 'est_cens_pred_jump'] <- sum(est_cens_probs*c(-0.5,-0.25))
+  
+  # Calculate expected path of target rate. 
+  mzlb[, 'est_cens_target_rate'] <- cumsum(mzlb[, 'est_cens_pred_jump']) + 
+    mzlb[1, 'eff_ffr'] - 1.5
+  # Correction to align at contact point with ZLB. 
+  mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] <- 
+    mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] - 
+    mzlb[cumsum(mzlb[, 'zlb_ind']) == 1, 'est_cens_target_rate']
+  
+  # Calculate terms in distance function. 
+  
+  # Calculate difference from target rate after ZLB liftoff. 
+  post_ZLB_dist <- sum((mzlb[mzlb[, 'post_zlb_ind'], 'est_cens_target_rate'] - 
+                          mzlb[mzlb[, 'post_zlb_ind'], 'fed_funds'])^2)
+  
+  # Calculate one-sided difference from predicted target rate above zero. 
+  in_ZLB_dist <- sum(mzlb[mzlb[, 'zlb_ind'] & 
+                            mzlb[, 'est_cens_target_rate'] > 0, 'est_cens_target_rate']^2)
+  
+  distance <- in_ZLB_dist + post_ZLB_dist
+  
+  return(distance)
+}
+
+# Test with function calls.
+cens_zlb_dist(est_cens_probs)
+
+# Parameters are probabilities of -0.5 and -0.25 rate cuts, respectively. 
+est_cens_probs <- c(0.10, 0.25) 
+
+# Initialize grid for calculation of several tests. 
+prob_2_seq <- seq(0, 0.2, by = 0.005)
+prob_1_seq <- seq(0, 0.4, by = 0.005)
+dist_test <- expand.grid(prob_2 = prob_2_seq, prob_1 = prob_1_seq)
+# Remove impossible combinations (negative probabilities). 
+dist_test <- dist_test[dist_test[, 'prob_1'] + dist_test[, 'prob_2'] <= 1, ]
+dist_test[, 'exp_jump'] <- NA
+dist_test[, 'dist'] <- NA
+
+for (row_num in 1:nrow(dist_test)) {
+  
+  test_cens_probs <- c(dist_test[row_num, 'prob_2'], dist_test[row_num, 'prob_1'])
+  
+  dist_test[row_num, 'exp_jump'] <- sum(test_cens_probs*c(-0.5, -0.25))
+  
+  dist_test[row_num, 'dist'] <- cens_zlb_dist(test_cens_probs)
+  
+}
+
+dist_test[order(dist_test$dist), ][1:50, ]
 
 
 ################################################################################
