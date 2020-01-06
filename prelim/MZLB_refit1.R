@@ -18,9 +18,11 @@
 # 
 # This version is designed for an initial data inspection 
 # and preliminary modeling with new variables and more observations. 
+# The output is a classification tree to be adjusted for the zero lower bound. 
 # 
 # Dependencies: 
-#   None.
+#   Packages urca and tseries for unit root tests. 
+#   Packages rpart and rpart.plot to estimate classification trees.
 # 
 ################################################################################
 
@@ -79,11 +81,21 @@ plot(fed_rates[, 'DFF'], type = 'l',
      main = 'Federal Funds Rate and Targets', 
      xlab = 'Date', 
      ylab = 'Interest Rate', 
-     ylim = c(0,10))
+     ylim = c(0,10), 
+     xaxt='n')
 lines(fed_rates[, 'DFEDTAR'], col = 'red')
 lines(fed_rates[, 'DFEDTARU'], col = 'blue')
 lines(fed_rates[, 'DFEDTARL'], col = 'blue')
 
+
+# Add dates on axes.
+new_year_dates <- (1:nrow(fed_rates))[substr(fed_rates[, 'DATE'], 6,7) == '01' & 
+                                        substr(fed_rates[, 'DATE'], 9,10) == '01']
+fed_rates[new_year_dates, 'DATE']
+new_year_labels <- substr(fed_rates[new_year_dates, 'DATE'], 1,4)
+
+axis(1, at = new_year_dates[seq(4, 32, by = 5)], 
+     labels = new_year_labels[seq(4, 32, by = 5)])
 
 #--------------------------------------------------------------------------------
 # Include indicator for zero lower bound
@@ -231,7 +243,8 @@ plot(cumsum(as.numeric(fed_monthly[-1, 'fed_jump']) - 3), # type = 'l',
      main = 'Discrete Jumps in Federal Funds Rate and Targets', 
      xlab = 'Date', 
      ylab = 'Interest Rate Jumps')
-
+# Looks similar to the original series, with some deviation
+# from the continuous rate changes in between monthly changes. 
 
 
 #--------------------------------------------------------------------------------
@@ -239,9 +252,11 @@ plot(cumsum(as.numeric(fed_monthly[-1, 'fed_jump']) - 3), # type = 'l',
 #--------------------------------------------------------------------------------
 
 # Initialize new factor. 
-fed_monthly[, 'fed_jump_zlb'] <- NA
-levels(fed_monthly[, 'fed_jump_zlb']) <- c('-9', 
-                                           levels(fed_monthly[, 'fed_jump']))
+# fed_monthly[, 'fed_jump_zlb'] <- NA
+fed_monthly[, 'fed_jump_zlb'] <- factor(levels = c('-9', 
+                                                   levels(fed_monthly[, 'fed_jump'])))
+# levels(fed_monthly[, 'fed_jump_zlb']) <- c('-9', 
+#                                            levels(fed_monthly[, 'fed_jump']))
 class(fed_monthly[, 'fed_jump_zlb'])
 levels(fed_monthly[, 'fed_jump_zlb'])
 
@@ -255,6 +270,31 @@ table(fed_monthly[, 'fed_jump_zlb'], useNA = 'ifany')
 table(fed_monthly[, 'zlb_ind'], 
       fed_monthly[, 'fed_jump_zlb'], useNA = 'ifany')
 # Only zero (censored) rate changes are mapped to '-9'.
+
+
+#--------------------------------------------------------------------------------
+# Change category labels to correespond to policy actions. 
+#--------------------------------------------------------------------------------
+
+
+# New caegorical variables have labels for policy actions.
+fed_jump_labels <- c('AE', 'ME', 'UN', 'MC', 'AC')
+
+fed_monthly[, 'fed_jump'] <- factor(fed_monthly[, 'fed_jump'], 
+                                        levels = levels(fed_monthly[, 'fed_jump']), 
+                                        labels = fed_jump_labels)
+fed_monthly[, 'fed_jump_zlb'] <- factor(fed_monthly[, 'fed_jump_zlb'], 
+                                        levels = levels(fed_monthly[, 'fed_jump_zlb']), 
+                                        labels = c('ZLB', fed_jump_labels))
+
+
+table(fed_monthly[, 'fed_jump'], useNA = 'ifany')
+table(fed_monthly[, 'fed_jump_zlb'], useNA = 'ifany')
+
+# Overwrites values but integers map to same order. 
+table(as.integer(fed_monthly[, 'fed_jump']), useNA = 'ifany')
+table(as.integer(fed_monthly[, 'fed_jump_zlb']), useNA = 'ifany')
+# ZLB makes classes off by one. 
 
 
 ################################################################################
@@ -302,7 +342,44 @@ colnames(mzlb)
 
 # Verify that dates are aligned.
 table(mzlb[, 'date'] == mzlb[, 'month'], useNA = 'ifany')
-# All good.
+# Check.
+
+# Verify that new variables were added. 
+colnames(mzlb)
+# Check.
+
+# Verify that variables have expected characteristics. 
+summary(mzlb)
+# Check.
+
+
+#--------------------------------------------------------------------------------
+# Create alternative Fed jump series.
+#--------------------------------------------------------------------------------
+
+# Labels added to same factors above.
+
+# # New categorical variables have labels designed for figures and output. 
+# # (originals are labeled by number, to simplify the translation to numbers.)
+# 
+# # Original categorical variables have "numeric" labels.
+# table(mzlb[, 'fed_jump'], useNA = 'ifany')
+# table(mzlb[, 'fed_jump_zlb'], useNA = 'ifany')
+# 
+# # New caegorical variables have labels for policy actions. 
+# fed_jump_labels <- c('AE', 'ME', 'UN', 'MC', 'AC')
+# mzlb[, 'fed_jump_label'] <- factor(levels = fed_jump_labels)
+# mzlb[, 'fed_jump_zlb_label'] <- factor(levels = c('ZLB', fed_jump_labels))
+# 
+# # Map numeric labels to policy action labels.
+# mzlb[, 'fed_jump_label'] <- mzlb[, 'fed_jump']...
+# mzlb[, 'fed_jump_zlb_label'] <- mzlb[, 'fed_jump_zlb']...
+# 
+# # Trust but verify. 
+# table(mzlb[, 'fed_jump'], 
+#       mzlb[, 'fed_jump_label'], useNA = 'ifany')
+# table(mzlb[, 'fed_jump_zlb'], 
+#       mzlb[, 'fed_jump_zlb_label'], useNA = 'ifany')
 
 
 ################################################################################
@@ -310,7 +387,7 @@ table(mzlb[, 'date'] == mzlb[, 'month'], useNA = 'ifany')
 ################################################################################
 
 # Specify a list of variables. 
-var_list <- colnames(mzlb)[c(2:49)]
+var_list <- colnames(mzlb)[c(2:length(colnames(mzlb)))]
 n_var <- length(var_list)
 
 
@@ -335,17 +412,11 @@ var_name <- 'house_tot'
 # Take differences.
 var_name <- 'wti_oil' # Similarly.
 
-# Note gaps in interest rate series.
-# Use constant maturity series instead of seasoned issues. 
-# (both for consistency with yield curve and to avoid gaps).
-# Both 20 and 30 year issues have missing data: 
-# Take average for long rate. 
-# Replace with principal components of the yield curve. 
-
 
 var_name <- ''
 
 var_num <- 0
+
 
 var_num <- var_num +1
 var_name <- var_list[var_num]
@@ -406,24 +477,48 @@ for (var_num in 1:n_var) {
 
 
 
-# List the variables with p-values less that 5% in first test.
+# List the variables with p-values less than 5% in first test.
 ur_results[ur_results[, 'n_0_p'] <= 2, 'var_name']
 ur_results[ur_results[, 'd_5_p'] <= 2, 'var_name']
 ur_results[ur_results[, 'adf_p'] <= 0.05, 'var_name']
 
+# List the variables with p-values greater than 5% in first test.
+ur_results[ur_results[, 'n_0_p'] >= 2, 'var_name']
+ur_results[ur_results[, 'd_5_p'] >= 2, 'var_name']
+ur_results[ur_results[, 'adf_p'] >= 0.05, 'var_name']
 
+# Consider any that pass one test for stationarity. 
 ur_results[ur_results[, 'n_0_p'] <= 2 |
              ur_results[, 'd_5_p'] <= 2 |
              ur_results[, 'adf_p'] <= 0.05, 'var_name']
 
-ur_list <- as.character(ur_results[ur_results[, 'n_0_p'] <= 2 |
+# Consider any that fail one test for stationarity. 
+ur_results[ur_results[, 'n_0_p'] >= 2 |
+             ur_results[, 'd_5_p'] >= 2 |
+             ur_results[, 'adf_p'] >= 0.05, 'var_name']
+
+
+# Visiual inspection of stationary series. 
+stat_list <- as.character(ur_results[ur_results[, 'n_0_p'] <= 2 |
                                      ur_results[, 'd_5_p'] <= 2 |
                                      ur_results[, 'adf_p'] <= 0.05, 'var_name'])
+
+# Visiual inspection of potentially nonstationary series. 
+ur_list <- as.character(ur_results[ur_results[, 'n_0_p'] <= 2 |
+                                       ur_results[, 'd_5_p'] <= 2 |
+                                       ur_results[, 'adf_p'] <= 0.05, 'var_name'])
+# To avoid false positives (negatives?) select based on the best test. 
+ur_list <- ur_results[ur_results[, 'adf_p'] >= 0.05, 'var_name']
+
+
+# Choose a list to inspect.
+plot_list <- as.character(ur_list)
+# plot_list <- as.character(stat_list)
 
 var_num <- 0
 
 var_num <- var_num +1
-var_name <- ur_list[var_num]
+var_name <- plot_list[var_num]
 plot(mzlb[, var_name], type = 'l', 
      main = sprintf('Plot of %s', var_name))
 
@@ -459,23 +554,51 @@ mzlb[, 'unemp_gap_1'] <- mzlb[, 'unemp'] - mzlb[, 'nrou']
 mzlb[, 'unemp_gap_2'] <- mzlb[, 'unemp_sa'] - mzlb[, 'nrou']
 mzlb[, 'unemp_gap_3'] <- mzlb[, 'unemp_ns'] - mzlb[, 'nrou']
 
+
+
+# Add dates on axes.
+new_year_dates <- (1:nrow(mzlb))[substr(mzlb[, 'date'], 6,7) == '01']
+mzlb[new_year_dates, 'date']
+new_year_labels <- substr(mzlb[new_year_dates, 'date'], 1,4)
+
+five_year_dates <- new_year_dates[seq(4, 32, by = 5)]
+five_year_labels <- new_year_labels[seq(4, 32, by = 5)]
+
 var_name <- 'unemp_gap_1'
 plot(mzlb[, var_name], type = 'l', 
-     main = sprintf('Plot of %s', var_name))
+     main = sprintf('Plot of %s', var_name), 
+     xaxt='n')
+
+axis(1, at = five_year_dates, 
+     labels = five_year_labels)
+
 print(var_name)
 
 
 # Plot with the ZLB indicator.
-lines(mzlb[, 'zlb_ind']*2, col = 'blue')
+lines(mzlb[, 'zlb_ind']*1, col = 'blue')
 
-# mzlb[mzlb[, 'zlb_ind'] & mzlb[, 'unemp_gap_1'] > 2, 'unemp_gap_1']
-# mzlb[mzlb[, 'zlb_ind'] & mzlb[, 'unemp_gap_1'] > 2, 'date']
-# (1:nrow(mzlb))[mzlb[, 'zlb_ind'] & mzlb[, 'unemp_gap_1'] > 2]
-# mzlb[340, 'date']
+# Add the cutoff at 2 to indicate (most of) ZLB.
+lines(rep(2, nrow(mzlb)), col = 'black', lty = 'dashed')
+
+# The unemployment gap gives a good indication of the recession in the ZLB period. 
+
+
+# A few other variables wil complete the picture, one the model is estimated. 
+
 
 #--------------------------------------------------------------------------------
 # Yield Curve
 #--------------------------------------------------------------------------------
+
+
+# Note gaps in interest rate series.
+# Use constant maturity series instead of seasoned issues. 
+# (both for consistency with yield curve and to avoid gaps).
+# Both 20 and 30 year issues have missing data: 
+# Impute from one to the other when missing (both are very similar). 
+# Replace with principal components of the yield curve. 
+
 
 # Both 20 and 30 year issues have missing data: 
 summary(mzlb[, c('tb20yr_cm', 'tb30yr_cm')])
@@ -566,9 +689,25 @@ target_var <- 'fed_jump'
 
 
 # Remove variables to exclude from estimation. 
-excl_var_list <- c('date', 'vix', 'lab_mkt_cond', colnames(mzlb)[c(33:54)])
+
+# Some variables are ineligible.
+excl_var_list <- c('date')
+
+# Some variables have missing data and have close substitutes.
+excl_var_list <- c(excl_var_list, 'vix', 'lab_mkt_cond')
+
+# Interest rate data are excluded from predictor variables. 
+# They are either dependent variables, used for evaluation post-estimation, 
+# or are replaced with the yield curve. 
+excl_var_list <- c(excl_var_list, 
+                   colnames(mzlb)[which(colnames(mzlb) == 'soma_hold') : 
+                                    which(colnames(mzlb) == 'fed_jump_zlb')])
+
+
+# Remove excluded variables or those that had to be differenced. 
 excl_var_list <- c(excl_var_list, diff_var_list, raw_unemp_var_list)
 
+# Initial list of predictor variables. 
 pred_var_list <- colnames(mzlb)[!(colnames(mzlb) %in% excl_var_list)]
 
 
@@ -688,9 +827,10 @@ for (var_name in trim_var_list) {
   mzlb[, lag_var_name] <- c(NA, NA, mzlb[-c(nrow(mzlb)-1, nrow(mzlb)), var_name])
   
 }
+# Verify lags.
 head(mzlb[, c(trim_var_list[1], sprintf('l1_%s', trim_var_list[1]), 
               sprintf('l2_%s', trim_var_list[1]))])
-
+# Check.
 
 #--------------------------------------------------------------------------------
 # Specification of Final List of Candidate Predictor Variables
@@ -698,8 +838,10 @@ head(mzlb[, c(trim_var_list[1], sprintf('l1_%s', trim_var_list[1]),
 
 
 # Include the chosen number of lags of variables. 
+# One lag:
 # pred_var_list <- c(trim_var_list, 
 #                    sprintf('l1_%s', trim_var_list))
+# Two lags:
 pred_var_list <- c(trim_var_list,
                    sprintf('l1_%s', trim_var_list),
                    sprintf('l2_%s', trim_var_list))
@@ -725,8 +867,8 @@ table(mzlb[, 'fed_jump'], mzlb[, 'fed_jump_zlb'], useNA = 'ifany')
 
 # Select target and observations depending on whether ZLB is ignored or excluded.
 
-sel_case <- 'ExclZLB'
-# sel_case <- 'IgnZLB'
+sel_case <- 'ExclZLB' # Used with indirect inference in second stage.
+# sel_case <- 'IgnZLB' # Estimated for comparison. 
 # sel_case <- 'AcknZLB'
 
 if (sel_case == 'ExclZLB') {
@@ -766,12 +908,8 @@ fmla_string <- sprintf('%s ~ %s', target_var,
 fmla <- as.formula(fmla_string)
 
 
-# Grow initial tree 
-
-# rand_seed <- round(runif(1)*1000)
-# 862, 851, 63, 388, 226 # With default control.
-# 443, 914 (split 12, bucket 3, xval 10)
-rand_seed <- 914
+# Grow initial tree.
+rand_seed <- 914 # Month and date of the first version of the paper (time flies!)
 set.seed(rand_seed)
 # fed_tree <- rpart(fmla,
 #              method = "class", data = mzlb[sel_obsns, ])
@@ -798,7 +936,6 @@ printcp(fed_tree)
 
 # Visualize cross-validation results.
 plotcp(fed_tree)
-print(rand_seed)
 
 # Detailed summary of splits. 
 # summary(fed_tree) 
@@ -809,8 +946,9 @@ fed_tree$variable.importance
 
 # Analyze predictions. 
 summary(predict(fed_tree, newdata = mzlb, prob = 'class'))
-summary(predict(fed_tree, newdata = mzlb, prob = 'prob'))
-summary(predict(fed_tree, newdata = mzlb, prob = 'vector'))
+#For muliple classes, the predictions are all class probabilities:
+# summary(predict(fed_tree, newdata = mzlb, prob = 'prob'))
+# summary(predict(fed_tree, newdata = mzlb, prob = 'vector'))
 head(predict(fed_tree))
 
 
@@ -819,13 +957,14 @@ head(predict(fed_tree))
 #--------------------------------------------------------------------------------
 
 # Prune tree by minimum cross-validation error.
+which.min(fed_tree$cptable[,"xerror"])
 fed_tree$cptable[which.min(fed_tree$cptable[,"xerror"]),"CP"]
 
 # Selected complexity parameter by case (there are ties). 
 if (sel_case == 'ExclZLB') {
   sel_cp_min <- fed_tree$cptable[2,"CP"]
 } else if (sel_case == 'AcknZLB') {
-  # sel_cp_min <- fed_tree$cptable[3,"CP"] # With ZLB flag
+  # sel_cp_min <- fed_tree$cptable[3,"CP"] # With ZLB flag (same as ExclZLB)
   sel_cp_min <- fed_tree$cptable[4,"CP"] # Without (two options)
   sel_cp_min <- fed_tree$cptable[5,"CP"]
 }  else if (sel_case == 'IgnZLB') {
@@ -851,21 +990,26 @@ pr_fed_tree$variable.importance
 #--------------------------------------------------------------------------------
 
 # Save it for TeX file.
-fig_version <- 2
+fig_version <- 3
 fig_file_name <- sprintf('%s/MZLBtree%s%d.pdf', 
                          fig_path, sel_case, fig_version)
-pdf(fig_file_name)
+
+# pdf(fig_file_name)
+
 rpart.plot(pr_fed_tree, type = 2, 
            cex = 0.65, tweak = 0.95, 
            yesno = 2, leaf.round = 0, 
            extra = 1, 
            legend.x = 20)
-dev.off()
+# Ignore the warning messages. Just check the figure. 
+
+# dev.off()
 
 
 # Plot leaf node number to assess variability. 
 plot(pr_fed_tree$where, type = 'l')
 lines(mzlb[, 'zlb_ind']*10 + min(pr_fed_tree$where), col = 'blue')
+
 
 # For ExclZLB, save this tree for indirect inference.
 if (sel_case == 'ExclZLB') {
@@ -883,9 +1027,18 @@ mzlb[, prob_class] <- predict(fed_tree, newdata = mzlb)
 
 # Initialize variables for expected jumps, predicted classes and their probabilities. 
 mzlb[, 'pred_jump'] <- 0
-mzlb[, 'pred_class'] <- '-9' # Initialize with dummy ZLB class. 
-levels(mzlb[, 'pred_class']) <- c('-9', levels(mzlb[, 'fed_jump']))
 # Fixed, regardless of target.
+# mzlb[, 'pred_class'] <- factor(levels = c('ZLB', levels(mzlb[, 'fed_jump'])))
+# Better to align with target. 
+mzlb[, 'pred_class'] <- factor(levels = levels(mzlb[, target_var]))
+
+
+# Previous version had numbers. 
+# mzlb[, 'pred_class'] <- factor(levels = c('-9', unique(as.integer(mzlb[, 'fed_jump']))))
+# mzlb[, 'pred_class'] <- '-9' # Initialize with dummy ZLB class. 
+# levels(mzlb[, 'pred_class']) <- c('-9', levels(mzlb[, 'fed_jump']))
+# levels(mzlb[, 'pred_class']) <- c('ZLB', levels(mzlb[, 'fed_jump']))
+
 
 # Current maximum probability of class, 
 # to be replaced with true max probability of class. 
@@ -893,9 +1046,11 @@ mzlb[, 'pred_max_prob'] <- 0
 
 # Translate class number into jump size. 
 if (target_var == 'fed_jump_zlb') {
-  jump_values <- c(0, 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0))
+  # jump_values <- c(0, 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0))
+  jump_values <- c(0, 0.25*seq(-2,2) + 0)
 } else {
-  jump_values <- 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0)
+  # jump_values <- 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0)
+  jump_values <- c(0.25*seq(-2,2) + 0)
 }
 
 for (class_num in 1:length(prob_class)) {
@@ -933,25 +1088,7 @@ plot(mzlb[, 'pred_jump'],
 
 # Plot time series of expected jump size. 
 plot(mzlb[, 'pred_jump'], type = 'l')
-# Time series of mean jump size. 
-adj_eff_ffr <- 2.5 # ExclZLB
-adj_eff_ffr <- 1.5 # IgnZLB (and AcknZLB for now)
-adj_eff_ffr <- 2.5 # AcknZLB
-plot(cumsum(mzlb[, 'pred_jump']) + mzlb[1, 'eff_ffr'] - adj_eff_ffr, 
-     type = 'l', ylim = c(0,12))
-lines(mzlb[, 'eff_ffr'], col = 'blue')
-# Compare with accumulated LSAPs. 
-# plot(mzlb[, 'soma_hold'], type = 'l')
-# range_soma <- range(mzlb[, 'soma_hold'], na.rm = TRUE)
-# plot((mzlb[, 'soma_hold'] - range_soma[1]) / 
-#        (range_soma[2] - range_soma[1]), type = 'l')
-lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
-        (range_soma[2] - range_soma[1]), col = 'red')
-# As expected, the ExclZLB model does not predict well on the ZLB period. 
-# Likewise, the AcknZLB model predicts zeros on the ZLB period, 
-# which is a placeholder waiting for the predictions from indirect inference. 
-
-
+# Variability as expected. 
 
 # Store expected jumps and class predictions by model. 
 mzlb[, sprintf('pred_jump_%s', sel_case)] <- mzlb[, 'pred_jump']
@@ -964,12 +1101,19 @@ mzlb[, sprintf('pred_class_%s', sel_case)] <- mzlb[, 'pred_class']
 
 
 # First, visualize the predictions and actuals.
+mzlb[, 'fed_jump_num'] <- 0.25*(as.integer(mzlb[, 'fed_jump']) - 3)
 plot(mzlb[, 'pred_jump'], 
-     0.25*(as.integer(mzlb[, 'fed_jump']) - 3))
+     mzlb[, 'fed_jump_num'])
 # A positive slope is good.
 
+# Fit regression model. 
+rpart_lm <- lm(formula = fed_jump_num ~ pred_jump, data = mzlb)
+summary(rpart_lm)
+# Store the r-squared for comparison. 
+fit_rsq <- summary(rpart_lm)$r.squared
 
-# A confusion matrix gives some numbers.
+
+# A confusion matrix gives more numbers to compare.
 conf_mat <- table(mzlb[sel_obsns, target_var], 
                   mzlb[sel_obsns, 'pred_class'], useNA = 'ifany')
 
@@ -980,10 +1124,14 @@ pct_correct <- sum(mzlb[sel_obsns, target_var] ==
                      mzlb[sel_obsns, 'pred_class'], na.rm = TRUE) / 
   sum(!is.na(mzlb[sel_obsns, target_var]))
 
+pct_correct_non_zlb <- sum(mzlb[!mzlb[, 'zlb_ind'], target_var] == 
+                     mzlb[!mzlb[, 'zlb_ind'], 'pred_class'], na.rm = TRUE) / 
+  sum(!is.na(mzlb[!mzlb[, 'zlb_ind'], target_var]))
+
 
 
 # Compare with the null model: Always zero (most frequent class).
-pct_zero <- sum(mzlb[sel_obsns, target_var] == 0, na.rm = TRUE) / 
+pct_zero <- sum(mzlb[sel_obsns, target_var] == 'UN', na.rm = TRUE) / 
   sum(!is.na(mzlb[sel_obsns, target_var]))
 
 
@@ -1001,18 +1149,157 @@ assign(conf_mat_name, conf_mat[, conf_mat_cols])
 # Store correct prediction as well. 
 pct_correct_name <- sprintf('pct_correct_%s', sel_case)
 assign(pct_correct_name, pct_correct)
+pct_correct_name <- sprintf('pct_correct_non_zlb_%s', sel_case)
+assign(pct_correct_name, pct_correct_non_zlb)
+
+
+# Store the r-squared of the prediction.
+fit_rsq_name <- sprintf('fit_rsq_%s', sel_case)
+assign(fit_rsq_name, fit_rsq)
 
 
 
 # Test:
 # conf_mat_ExclZLB
 # pct_correct_ExclZLB
+# pct_correct_non_zlb_ExclZLB
+# fit_rsq_ExclZLB
 # conf_mat_AcknZLB
 # conf_mat_AcknZLB_orig
 # pct_correct_AcknZLB
+# pct_correct_non_zlb_AcknZLB
+# fit_rsq_AcknZLB
 # conf_mat_IgnZLB
 # pct_correct_IgnZLB
+# pct_correct_non_zlb_IgnZLB
+# fit_rsq_IgnZLB
 # pct_zero
+
+
+
+
+#--------------------------------------------------------------------------------
+# Plot Results after all 3 model cases are estimated
+#--------------------------------------------------------------------------------
+
+fig_file_name <- sprintf('%s/FFRpred%d.pdf', 
+                         fig_path, fig_version)
+
+# Open pdf file to save figure.
+# pdf(fig_file_name)
+
+plot(mzlb[, 'fed_funds'], 
+     main = 'Effective Federal Funds Rate and Predictions', 
+     xlab = 'Date', 
+     ylab = 'Interest Rates', 
+     cex.main = 1.5, 
+     cex.lab = 1.5, 
+     type = 'l', ylim = c(0,12), col = 'blue', lwd = 4, 
+     xaxt='n')
+axis(1, at = five_year_dates, 
+     labels = five_year_labels)
+# lines(mzlb[, 'fed_funds'], col = 'blue', lwd = 3)
+
+# Plot the model predictions for each case. 
+adj_eff_ffr <- 2.0 # Initial condition.
+fig_sel_case <- 'ExclZLB'
+lines(cumsum(mzlb[, sprintf('pred_jump_%s', fig_sel_case)]) + 
+        mzlb[1, 'eff_ffr'] - adj_eff_ffr, 
+      col = 'black', lwd = 3, lty = 'dashed')
+
+fig_sel_case <- 'IgnZLB'
+lines(cumsum(mzlb[, sprintf('pred_jump_%s', fig_sel_case)]) + 
+        mzlb[1, 'eff_ffr'] - adj_eff_ffr, 
+      col = 'black', lwd = 3, lty = 'twodash')
+
+fig_sel_case <- 'AcknZLB'
+lines(cumsum(mzlb[, sprintf('pred_jump_%s', fig_sel_case)]) + 
+        mzlb[1, 'eff_ffr'] - adj_eff_ffr, 
+      col = 'black', lwd = 3, lty = 'dotted')
+
+
+# Close pdf file to save figure.
+# dev.off()
+
+
+# As expected, the ExclZLB model does not predict well on the ZLB period. 
+# Likewise, the AcknZLB model predicts zeros on the ZLB period, 
+# which is a placeholder waiting for the predictions from indirect inference. 
+
+
+
+# Compare with accumulated LSAPs. 
+# plot(mzlb[, 'soma_hold'], type = 'l')
+# range_soma <- range(mzlb[, 'soma_hold'], na.rm = TRUE)
+# plot((mzlb[, 'soma_hold'] - range_soma[1]) / 
+#        (range_soma[2] - range_soma[1]), type = 'l')
+# lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
+#         (range_soma[2] - range_soma[1]), col = 'red')
+# Save for after indirect inference where ZLB probabilties will be estimated.
+
+
+
+#--------------------------------------------------------------------------------
+# Plot macroeconomic variables during ZLB period. 
+#--------------------------------------------------------------------------------
+
+fig_file_name <- sprintf('%s/Macro_vars%d.pdf', 
+                         fig_path, fig_version)
+
+# Open pdf file to save figure.
+# pdf(fig_file_name)
+
+plot(mzlb[, 'fed_funds'], type = 'l', 
+     main = c('Key Macroeconomic Variables', 
+              'during the Zero Lower Bound Episode'),
+     xlab = 'Date', 
+     ylab = 'Percent (Annual)', 
+     cex.main = 1.5, 
+     cex.lab = 1.0,  
+     xaxt='n', 
+     lwd = 3, col = 'blue', 
+     ylim = c(-4, 10))
+lines(rep(0, nrow(mzlb)), col = 'black')
+axis(1, at = five_year_dates, 
+     labels = five_year_labels)
+
+# Olverlay the Federal Funds Rate.
+# lines(mzlb[, 'fed_funds'], col = 'blue', lwd = 2)
+# Olverlay the  Unemployment gap. 
+lines(mzlb[, 'unemp_gap_1'], col = 'green', lwd = 3, lty = 'dashed')
+
+# Add the cutoff at 2 to indicate (most of) ZLB.
+lines(rep(2, nrow(mzlb)), col = 'black', lty = 'dashed')
+# The unemployment gap tells quite a lot 
+# about the recession in the ZLB period. 
+
+
+# Plot with the ZLB indicator.
+# lines(mzlb[, 'zlb_ind']*1, col = 'blue')
+# Redundant with Federal Funds Rate.
+# Use vertical lines instead. 
+abline(v = which(cumsum(mzlb[, 'zlb_ind']) == 1), 
+       col = 'black', lty = 'dashed')
+abline(v = which(cumsum(mzlb[, 'zlb_ind']) == max(cumsum(mzlb[, 'zlb_ind'])))[1], 
+       col = 'black', lty = 'dashed')
+
+
+# A few other variables complete the picture. 
+# summary(mzlb[, 'lead_ind_adj'])
+lines(mzlb[, 'lead_ind_adj'] - 100, col = 'red', lwd = 3, lty = 'dotted')
+mtext('Leading Indicator', side = 4, line = -1, cex.lab = 1,las = 0)
+axis(4, at = seq(-2.5, 10, by = 2.5), labels = seq(-2.5, 10, by = 2.5) + 100)
+
+
+# Add liness to separate a recovery portion of the ZLB. 
+abline(v = 330, 
+       col = 'black', lty = 'dashed')
+# Unemployment gap still above 0.67.
+lines(rep(0.67, nrow(mzlb)), col = 'black', lty = 'dashed')
+
+
+# Close pdf file to save figure.
+# dev.off()
 
 
 ################################################################################

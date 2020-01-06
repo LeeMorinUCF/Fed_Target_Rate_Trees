@@ -2,13 +2,22 @@
 # 
 # Decision Trees for the Federal Reserve Target Rate Policy
 # 
+# Code to Accompany 
+# Federal Reserve Policy after the Zero Lower Bound:
+# An Indirect Inference Approach
+# 
 # Lee Morin, Ph.D.
 # Assistant Professor
 # Department of Economics
 # College of Business Administration
 # University of Central Florida
 # 
-# June 27, 2019
+# Ying Shang, Ph.D.
+# Associate Professor
+# International School of Economics and Management
+# Capital University of Economics and Business
+# 
+# January 4, 2020
 # 
 ################################################################################
 # 
@@ -19,7 +28,7 @@
 # This version estimates the missing shadow rate changes by indirect inference. 
 # 
 # Dependencies: 
-#   Assumes MZLB_refit.R has been run on ExclZLB model. 
+#   Assumes ZLB_II_policy_trees.R has been run on 'ExclZLB' model. 
 # 
 ################################################################################
 
@@ -28,7 +37,7 @@
 # Load Data
 ################################################################################
 
-# # Added to original data series.
+# # No longer needed: added to original data series.
 # 
 # # Need complete federal funds series.
 # # Specify parameters for critical values.
@@ -63,10 +72,10 @@
 
 # Extract predictions ExclZLB model. 
 sel_case <- 'ExclZLB'
+target_var <- 'fed_jump'
 
 
-
-# Store expected jumps and class predictions by model. 
+# Verify expected jumps and class predictions by model. 
 summary(mzlb[, sprintf('pred_jump_%s', sel_case)])
 table(mzlb[, sprintf('pred_class_%s', sel_case)], useNA = 'ifany')
 
@@ -74,6 +83,7 @@ table(mzlb[, sprintf('pred_class_%s', sel_case)], useNA = 'ifany')
 plot(mzlb[, sprintf('pred_jump_%s', sel_case)], 
      type = 'l')
 lines(mzlb[, 'zlb_ind']*0.25, col = 'blue')
+range_soma <- range(mzlb[, 'soma_hold'], na.rm = TRUE)
 lines(0.2*(mzlb[, 'soma_hold'] - range_soma[1]) / 
         (range_soma[2] - range_soma[1]), col = 'red')
 lines(mzlb[, 'shadow_rate']*0.1, col = 'green')
@@ -145,7 +155,7 @@ table(mzlb[, sprintf('pred_jump_%s', sel_case)],
 # Calculate inputs to distance function. 
 
 # Parameters are probabilities of -0.5 and -0.25 rate cuts, respectively. 
-est_cens_probs <- c(0.10, 0.25) 
+est_cens_probs <- c(0.10, 0.25) # Sample values, to test feasibility. 
 
 # Calculate expected rate cuts over censored ZLB class period. 
 mzlb[, 'est_cens_pred_jump'] <- mzlb[, sprintf('pred_jump_%s', sel_case)]
@@ -169,10 +179,11 @@ mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] <-
 plot(mzlb[, 'est_cens_target_rate'], type = 'l')
 lines(mzlb[, 'fed_funds'], col = 'blue')
 lines(mzlb[, 'shadow_rate'], col = 'green')
+range_soma <- range(mzlb[, 'soma_hold'], na.rm = TRUE)
 lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
         (range_soma[2] - range_soma[1]), col = 'red')
 # That was for a pre-specified value of the censored probabilities. 
-
+# Next step is to estimate those parameters. 
 
 
 #--------------------------------------------------------------------------------
@@ -266,7 +277,7 @@ for (row_num in 1:nrow(dist_test)) {
 
 dist_test[order(dist_test$dist), ][1:50, ]
 
-# Confirms tha this is enough to identify the first moment 
+# Confirms that this is enough to identify the first moment 
 # of the change in interest rates. 
 # Need more auxiliary parameters. 
 
@@ -284,7 +295,8 @@ target_var_2nd <- 'fed_jump_st_dev'
 
 mzlb[, target_var_2nd] <- - mzlb[, 'pred_jump_ExclZLB']^2
 prob_class <- sprintf('prob_%s', levels(mzlb[, target_var]))
-jump_values <- 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0)
+# jump_values <- 0.25*(as.integer(levels(mzlb[, 'fed_jump'])) + 0)
+jump_values <- c(0.25*seq(-2,2) + 0)
 
 for (class_num in 1:length(prob_class)) {
   
@@ -297,6 +309,10 @@ for (class_num in 1:length(prob_class)) {
 summary(mzlb[, target_var_2nd])
 summary(sqrt(mzlb[, target_var_2nd]))
 
+# Check for negative values.
+mzlb[mzlb[, target_var_2nd] < 0, c(prob_class, target_var_2nd)]
+
+
 # Restate to standard deviations. 
 mzlb[, target_var_2nd] <- sqrt(mzlb[, target_var_2nd])
 
@@ -304,7 +320,8 @@ table(mzlb[, target_var_2nd],
       mzlb[, 'zlb_ind'], useNA = 'ifany')
 table(mzlb[, target_var_2nd], 
       mzlb[, 'cens_class_ind'], useNA = 'ifany')
-
+# Twelve observations dropped.
+# Still enough to identify second probability. 
 
 
 # Specify model equation.
@@ -430,7 +447,7 @@ for (row_num in 1:nrow(dist_test)) {
 
 dist_test[order(dist_test$dist), ][1:50, ]
 
-# Create a finer simplex to manually optimize over. 
+# Create a finer simplex to optimize over. 
 min(dist_test[order(dist_test$dist), ][1:50, 'prob_2'])
 max(dist_test[order(dist_test$dist), ][1:50, 'prob_2'])
 min(dist_test[order(dist_test$dist), ][1:50, 'prob_1'])
@@ -544,6 +561,7 @@ axis(1, at = new_year_dates[seq(4, 32, by = 5)],
      labels = new_year_labels[seq(4, 32, by = 5)])
 
 
+
 #--------------------------------------------------------------------------------
 # Compare with SOMA asset holdings.
 #--------------------------------------------------------------------------------
@@ -579,18 +597,26 @@ lines(rep(0, nrow(mzlb)), lwd = 2, col = 'black')
 # Plot both together for a single figure.
 #--------------------------------------------------------------------------------
 
+fig_file_name <- sprintf('%s/MZLBshadow%d.pdf', 
+                         fig_path, fig_version)
+
+# Open pdf file to save figure.
+# pdf(fig_file_name)
+
 
 # Compare with actual federal funds target rate. 
-plot(mzlb[, 'est_cens_target_rate'], type = 'l', 
+plot(mzlb[, 'fed_funds'], type = 'l', 
      main = 'Comparison with Shadow Rates and SOMA Holdings', 
      ylab = c('Interest Rates % (left axis)', 
               'SOMA Holdings (billions, right axis)'),
      xaxt='n', 
      ylim = c(-4, 10), 
-     lwd = 2)
-lines(mzlb[, 'fed_funds'], col = 'blue', lwd = 2)
-lines(mzlb[, 'shadow_rate'], col = 'green', lwd = 2)
-lines(mzlb[, 'soma_hold']/500, col = 'red', lwd = 2)
+     col = 'blue', 
+     lwd = 3)
+# lines(mzlb[, 'fed_funds'], col = 'blue', lwd = 3)
+lines(mzlb[, 'est_cens_target_rate'], col = 'black', lwd = 3, lty = 'dashed')
+lines(mzlb[, 'shadow_rate'], col = 'green', lwd = 3, lty = 'dotted')
+lines(mzlb[, 'soma_hold']/500, col = 'red', lwd = 3, lty = 'twodash')
 lines(rep(0, nrow(mzlb)), lwd = 1, col = 'black')
 
 axis(1, at = new_year_dates[seq(4, 32, by = 5)], 
@@ -598,21 +624,36 @@ axis(1, at = new_year_dates[seq(4, 32, by = 5)],
 axis(4, at = seq(0, 10, by = 2), labels = seq(0, 10, by = 2)*500)
 
 
+# Close pdf file to save figure.
+# dev.off()
+
+# Determine date of sharp upturn in shadow rate.
+min(mzlb[, 'est_cens_target_rate'])
+
+mzlb[mzlb[, 'est_cens_target_rate'] ==
+       min(mzlb[, 'est_cens_target_rate']), 
+     c('date', 'est_cens_target_rate')]
+# Output:
+#       date     est_cens_target_rate
+# 322 2013-03             -4.132281
+
 
 ################################################################################
 # End. 
 ################################################################################
 
-# Correct the calculation of auxiliary parameters. 
+# # Correcting the calculation of auxiliary parameters. 
+# 
+# test_cens_probs <- c(0.2, 0.0)
+# est_pred_2nd_ap <- sum(c(-0.5, -0.25, 0)^2 *
+#                          c(test_cens_probs, 1-sum(test_cens_probs)))
+# 
+# est_pred_2nd_ap <- - est_pred_avg^2 + 
+#   sum(c(-0.5, -0.25, 0)^2 * 
+#         c(test_cens_probs, 1-sum(test_cens_probs)))
+# 
+# est_pred_2nd_ap <- sqrt(- est_pred_avg^2 + 
+#                           sum(c(-0.5, -0.25, 0)^2 * 
+#                                 c(test_cens_probs, 1-sum(test_cens_probs))))
 
-test_cens_probs <- c(0.2, 0.0)
-est_pred_2nd_ap <- sum(c(-0.5, -0.25, 0)^2 *
-                         c(test_cens_probs, 1-sum(test_cens_probs)))
 
-est_pred_2nd_ap <- - est_pred_avg^2 + 
-  sum(c(-0.5, -0.25, 0)^2 * 
-        c(test_cens_probs, 1-sum(test_cens_probs)))
-
-est_pred_2nd_ap <- sqrt(- est_pred_avg^2 + 
-                          sum(c(-0.5, -0.25, 0)^2 * 
-                                c(test_cens_probs, 1-sum(test_cens_probs))))
