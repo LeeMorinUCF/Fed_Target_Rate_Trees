@@ -423,7 +423,7 @@ lines(cumsum(mzlb[, sprintf('pred_jump_%s', fig_sel_case)]) +
 #--------------------------------------------------------------------------------
 
 
-# Plot Figure 1 and output to the figs folder. 
+# Plot Figure 5 and output to the figs folder. 
 # Create two copies of each to ease 
 # building the pdf documents on different platforms. 
 fig_type_list <- c('pdf', 'eps')

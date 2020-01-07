@@ -28,7 +28,7 @@
 # This version estimates the missing shadow rate changes by indirect inference. 
 # 
 # Dependencies: 
-#   Assumes ZLB_II_policy_trees.R has been run on 'ExclZLB' model. 
+#   Assumes ZLB_II_2_policy_trees.R has been run on 'ExclZLB' model. 
 # 
 ################################################################################
 
@@ -88,10 +88,10 @@ lines(0.2*(mzlb[, 'soma_hold'] - range_soma[1]) /
         (range_soma[2] - range_soma[1]), col = 'red')
 lines(mzlb[, 'shadow_rate']*0.1, col = 'green')
 
-# Compare variability if predicted class over ZLB period.
+# Compare variability of predicted class over ZLB period.
 table(mzlb[, sprintf('pred_class_%s', sel_case)], 
       mzlb[, 'zlb_ind'], useNA = 'ifany')
-# Note there are no negative predictions in ZLB 
+# Note there are no negative predictions (AE or ME) in ZLB 
 # (none are observed with censoring at ZLB).
 
 
@@ -145,144 +145,22 @@ table(mzlb[, sprintf('pred_jump_%s', sel_case)],
 # Compare with actual target rate series. 
 
 # Should be as close as possible before and after ZLB, when target rate is observed.
-#   => penalty from difference from target rate. 
+#   => distance is calculated from difference from target rate. 
 # Should remain negative while ZLB is in effect. 
-#   => penalty only from predicted target rate above zero. 
+#   => distance is calculated only from predicted target rate above zero. 
 
 # First need to calculate expected jump sizes and expected target rates. 
 
 
-# Calculate inputs to distance function. 
 
-# Parameters are probabilities of -0.5 and -0.25 rate cuts, respectively. 
-est_cens_probs <- c(0.10, 0.25) # Sample values, to test feasibility. 
-
-# Calculate expected rate cuts over censored ZLB class period. 
-mzlb[, 'est_cens_pred_jump'] <- mzlb[, sprintf('pred_jump_%s', sel_case)]
-mzlb[mzlb[, 'cens_class_ind'], 'est_cens_pred_jump'] <- NA
-mzlb[mzlb[, 'cens_class_ind'], 'est_cens_pred_jump'] <- sum(est_cens_probs*c(-0.5,-0.25))
-
-# Sense check. 
-summary(mzlb[, 'est_cens_pred_jump'])
-table(mzlb[, 'est_cens_pred_jump'], 
-      mzlb[, 'cens_class_ind'], useNA = 'ifany')
-
-# Calculate expected path of target rate. 
-mzlb[, 'est_cens_target_rate'] <- cumsum(mzlb[, 'est_cens_pred_jump']) + 
-  mzlb[1, 'eff_ffr'] - 1.5
-# Correction to align at contact point with ZLB. 
-mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] <- 
-  mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] - 
-  mzlb[cumsum(mzlb[, 'zlb_ind']) == 1, 'est_cens_target_rate']
-
-# Compare with actual federal funds target rate. 
-plot(mzlb[, 'est_cens_target_rate'], type = 'l')
-lines(mzlb[, 'fed_funds'], col = 'blue')
-lines(mzlb[, 'shadow_rate'], col = 'green')
-range_soma <- range(mzlb[, 'soma_hold'], na.rm = TRUE)
-lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
-        (range_soma[2] - range_soma[1]), col = 'red')
-# That was for a pre-specified value of the censored probabilities. 
-# Next step is to estimate those parameters. 
-
-
-#--------------------------------------------------------------------------------
-# Calculate distance function. 
-#--------------------------------------------------------------------------------
-
-# Calculate difference from target rate after ZLB liftoff. 
-
-summary(mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1 & 
-               !mzlb[, 'zlb_ind'], 'est_cens_target_rate'])
-
-# Create index for post-ZLB period. 
-mzlb[, 'post_zlb_ind'] <- cumsum(mzlb[, 'zlb_ind']) >= 1 & 
+# Create index for post-ZLB period.
+mzlb[, 'post_zlb_ind'] <- cumsum(mzlb[, 'zlb_ind']) >= 1 &
   !mzlb[, 'zlb_ind']
 mzlb[nrow(mzlb), 'post_zlb_ind'] <- FALSE
 
-post_ZLB_dist <- sum((mzlb[mzlb[, 'post_zlb_ind'], 'est_cens_target_rate'] - 
-                        mzlb[mzlb[, 'post_zlb_ind'], 'fed_funds'])^2)
-
-
-
-# Calculate one-sided difference from predicted target rate above zero. 
-in_ZLB_dist <- sum(mzlb[mzlb[, 'zlb_ind'] & 
-                          mzlb[, 'est_cens_target_rate'] > 0, 'est_cens_target_rate']^2)
-
-distance <- in_ZLB_dist + post_ZLB_dist
-
-
 
 #--------------------------------------------------------------------------------
-# Create a function for optimization based on interest rate statistics only. 
-# This is enough to identify the first moment of the change in interest rates. 
-#--------------------------------------------------------------------------------
-
-cens_zlb_dist_v1 <- function(est_cens_probs) {
-  
-  distance <- 0
-  
-  # Calculate expected rate cuts over censored ZLB class period. 
-  mzlb[, 'est_cens_pred_jump'] <- mzlb[, 'pred_jump_ExclZLB']
-  mzlb[mzlb[, 'cens_class_ind'], 'est_cens_pred_jump'] <- NA
-  mzlb[mzlb[, 'cens_class_ind'], 'est_cens_pred_jump'] <- sum(est_cens_probs*c(-0.5,-0.25))
-  
-  # Calculate expected path of target rate. 
-  mzlb[, 'est_cens_target_rate'] <- cumsum(mzlb[, 'est_cens_pred_jump']) + 
-    mzlb[1, 'eff_ffr'] - 1.5
-  # Correction to align at contact point with ZLB. 
-  mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] <- 
-    mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] - 
-    mzlb[cumsum(mzlb[, 'zlb_ind']) == 1, 'est_cens_target_rate']
-  
-  # Calculate terms in distance function. 
-  
-  # Calculate difference from target rate after ZLB liftoff. 
-  post_ZLB_dist <- sum((mzlb[mzlb[, 'post_zlb_ind'], 'est_cens_target_rate'] - 
-                          mzlb[mzlb[, 'post_zlb_ind'], 'fed_funds'])^2)
-  
-  # Calculate one-sided difference from predicted target rate above zero. 
-  in_ZLB_dist <- sum(mzlb[mzlb[, 'zlb_ind'] & 
-                            mzlb[, 'est_cens_target_rate'] > 0, 'est_cens_target_rate']^2)
-  
-  distance <- in_ZLB_dist + post_ZLB_dist
-  
-  return(distance)
-}
-
-# Test with function calls.
-cens_zlb_dist_v1(est_cens_probs)
-
-# Parameters are probabilities of -0.5 and -0.25 rate cuts, respectively. 
-est_cens_probs <- c(0.10, 0.25) 
-
-# Initialize grid for calculation of several tests. 
-prob_2_seq <- seq(0, 0.2, by = 0.005)
-prob_1_seq <- seq(0, 0.4, by = 0.005)
-dist_test <- expand.grid(prob_2 = prob_2_seq, prob_1 = prob_1_seq)
-# Remove impossible combinations (negative probabilities). 
-dist_test <- dist_test[dist_test[, 'prob_1'] + dist_test[, 'prob_2'] <= 1, ]
-dist_test[, 'exp_jump'] <- NA
-dist_test[, 'dist'] <- NA
-
-for (row_num in 1:nrow(dist_test)) {
-  
-  test_cens_probs <- c(dist_test[row_num, 'prob_2'], dist_test[row_num, 'prob_1'])
-  
-  dist_test[row_num, 'exp_jump'] <- sum(test_cens_probs*c(-0.5, -0.25))
-  
-  dist_test[row_num, 'dist'] <- cens_zlb_dist_v1(test_cens_probs)
-  
-}
-
-dist_test[order(dist_test$dist), ][1:50, ]
-
-# Confirms that this is enough to identify the first moment 
-# of the change in interest rates. 
-# Need more auxiliary parameters. 
-
-#--------------------------------------------------------------------------------
-# Create a second function for optimization based on 
+# Create an objective function for optimization based on 
 # additional (auxilliary) parameters. 
 # This is required to identify the second moment of the change in interest rates. 
 #--------------------------------------------------------------------------------
@@ -420,11 +298,18 @@ cens_zlb_dist <- function(est_cens_probs) {
   return(distance)
 }
 
+
+
+# Parameters are probabilities of -0.5 and -0.25 rate cuts, respectively. 
+est_cens_probs <- c(0.10, 0.25) # To test function. 
+
 # Test with function calls.
 cens_zlb_dist(est_cens_probs)
 
-# Parameters are probabilities of -0.5 and -0.25 rate cuts, respectively. 
-est_cens_probs <- c(0.10, 0.25) 
+#--------------------------------------------------------------------------------
+# Preliminary grid search for starting values
+#--------------------------------------------------------------------------------
+
 
 # Initialize grid for calculation of several tests. 
 prob_2_seq <- seq(0.04, 0.2, by = 0.001)
@@ -445,6 +330,7 @@ for (row_num in 1:nrow(dist_test)) {
   
 }
 
+# Inspect leading parameter values.
 dist_test[order(dist_test$dist), ][1:50, ]
 
 # Create a finer simplex to optimize over. 
@@ -461,7 +347,10 @@ est_cens_probs_start <- dist_test[order(dist_test$dist), ][1, c('prob_2', 'prob_
 # Perform estimation by indirect inference. 
 ################################################################################
 
-# Optimize on rate decrease probabilities.  
+
+#--------------------------------------------------------------------------------
+# Optimize over rate decrease probabilities.  
+#--------------------------------------------------------------------------------
 
 
 # optim(par, fn, gr = NULL,
@@ -481,6 +370,12 @@ est_cens_probs_model <- optim(par = est_cens_probs_start,
 
 est_cens_probs_model
 
+
+#--------------------------------------------------------------------------------
+# Calculate statistics.  
+#--------------------------------------------------------------------------------
+
+
 # Parameter estimates in percentage points. 
 prob_hat <- est_cens_probs_model$par*100
 
@@ -497,7 +392,14 @@ conf_int_u <- pmin(prob_hat + 1.96*se_probs, 100)
 conf_int_l <- pmax(prob_hat - 1.96*se_probs, 0)
 
 
-# Plot predictions.
+################################################################################
+# Postestimation and Comparison. 
+################################################################################
+
+#--------------------------------------------------------------------------------
+# Calculate predictions.  
+#--------------------------------------------------------------------------------
+
 # Calculate expected rate cuts over censored ZLB class period. 
 mzlb[, 'est_cens_pred_jump'] <- mzlb[, 'pred_jump_ExclZLB']
 mzlb[mzlb[, 'cens_class_ind'], 'est_cens_pred_jump'] <- NA
@@ -512,96 +414,35 @@ mzlb[cumsum(mzlb[, 'zlb_ind']) >= 1, 'est_cens_target_rate'] <-
   mzlb[cumsum(mzlb[, 'zlb_ind']) == 1, 'est_cens_target_rate']
 
 
-# Compare with actual federal funds target rate. 
+
+#--------------------------------------------------------------------------------
+# Plot predictions.  
+#--------------------------------------------------------------------------------
+
+# Plot the components on screen for inspection. 
+
+
+# Compare with actual federal funds target rate and SOMA holdings.
 plot(mzlb[, 'est_cens_target_rate'], type = 'l')
 lines(mzlb[, 'fed_funds'], col = 'blue')
 lines(mzlb[, 'shadow_rate'], col = 'green')
-lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) / 
+lines(10*(mzlb[, 'soma_hold'] - range_soma[1]) /
         (range_soma[2] - range_soma[1]), col = 'red')
 
 
-# Compare components of the optimal distance. 
-est_pred_2nd_ap_hat <- sum(c(-0.5, -0.25, 0)^2 * 
-                         c(est_cens_probs_model$par, 1-sum(est_cens_probs_model$par)))
-avg_pred_2nd_ap
-
-
-
-
-################################################################################
-# Postestimation and Comparison. 
-################################################################################
 
 
 #--------------------------------------------------------------------------------
 # Output figures of predicted (shadow) target rates.
 #--------------------------------------------------------------------------------
 
+# Plot the components on screen for inspection. 
+
 
 # Add dates on axes.
 new_year_dates <- (1:nrow(mzlb))[substr(mzlb[, 'date'], 6,7) == '01']
 mzlb[new_year_dates, 'date']
 new_year_labels <- substr(mzlb[new_year_dates, 'date'], 1,4)
-
-
-#--------------------------------------------------------------------------------
-# Compare with shadow rate model.
-#--------------------------------------------------------------------------------
-
-# Compare with actual federal funds target rate. 
-plot(mzlb[, 'est_cens_target_rate'], type = 'l', 
-     main = 'Estimates of the Federal Funds Rate', 
-     ylab = 'Estimates of the Federal Funds Rate', 
-     xaxt='n')
-lines(mzlb[, 'fed_funds'], col = 'blue')
-lines(mzlb[, 'shadow_rate'], col = 'green')
-lines(rep(0, nrow(mzlb)), lwd = 2, col = 'black')
-
-axis(1, at = new_year_dates[seq(4, 32, by = 5)], 
-     labels = new_year_labels[seq(4, 32, by = 5)])
-
-
-
-#--------------------------------------------------------------------------------
-# Compare with SOMA asset holdings.
-#--------------------------------------------------------------------------------
-
-plot(mzlb[, 'soma_hold'], type = 'l')
-
-
-mzlb[, 'd_soma_hold'] <- c(NA, diff(mzlb[, 'soma_hold']))
-
-plot(mzlb[mzlb[, 'zlb_ind'], 'est_cens_pred_jump'], 
-     mzlb[mzlb[, 'zlb_ind'], 'd_soma_hold'])
-
-
-# Compare with actual federal funds target rate. 
-plot(mzlb[!is.na(mzlb[, 'soma_hold']), 'est_cens_target_rate'], 
-     type = 'l', ylim = c(-5,12), 
-     # main = 'Predicted Federal Funds Rate and SOMA Asset Holdings', 
-     main = '', 
-     xlab = 'Date', 
-     ylab = 'FFR and SOMA Asset Holdings')
-# lines(mzlb[, 'fed_funds'], col = 'blue')
-# lines(mzlb[, 'shadow_rate'], col = 'green')
-lines(10*(mzlb[!is.na(mzlb[, 'soma_hold']), 'soma_hold'] - range_soma[1]) / 
-        (range_soma[2] - range_soma[1]) + 1, col = 'red')
-lines(rep(0, nrow(mzlb)), lwd = 2, col = 'black')
-
-# axis(1, at = new_year_dates[seq(4, 32, by = 5)], 
-#      labels = new_year_labels[seq(4, 32, by = 5)])
-
-
-
-#--------------------------------------------------------------------------------
-# Plot both together for a single figure.
-#--------------------------------------------------------------------------------
-
-fig_file_name <- sprintf('%s/MZLBshadow%d.pdf', 
-                         fig_path, fig_version)
-
-# Open pdf file to save figure.
-# pdf(fig_file_name)
 
 
 # Compare with actual federal funds target rate. 
@@ -624,8 +465,6 @@ axis(1, at = new_year_dates[seq(4, 32, by = 5)],
 axis(4, at = seq(0, 10, by = 2), labels = seq(0, 10, by = 2)*500)
 
 
-# Close pdf file to save figure.
-# dev.off()
 
 # Determine date of sharp upturn in shadow rate.
 min(mzlb[, 'est_cens_target_rate'])
@@ -638,22 +477,62 @@ mzlb[mzlb[, 'est_cens_target_rate'] ==
 # 322 2013-03             -4.132281
 
 
+
+#--------------------------------------------------------------------------------
+# Ready to produce the publishable version. 
+#--------------------------------------------------------------------------------
+
+# Plot Figure 6 and output to the figs folder. 
+# Create two copies of each to ease 
+# building the pdf documents on different platforms. 
+fig_type_list <- c('pdf', 'eps')
+fig_num <- 6
+
+for (fig_type in fig_type_list) {
+  
+  # Extension depends on figure file format. 
+  fig_file_name <- sprintf('%s/Fig%d.%s', fig_path, fig_num, fig_type)
+  
+  
+  # Open the selected file. 
+  if (fig_type == 'pdf') {
+    # Open pdf file to save figure.
+    pdf(fig_file_name)
+  } else if (fig_type == 'eps') {
+    # Alternatively, open eps file to save figure.
+    postscript(fig_file_name)
+    # Required for submission of manuscript. 
+  }
+  
+  
+  # Compare with actual federal funds target rate. 
+  plot(mzlb[, 'fed_funds'], type = 'l', 
+       # main = 'Comparison with Shadow Rates and SOMA Holdings', 
+       ylab = c('Interest Rates % (left axis)', 
+                'SOMA Holdings (billions, right axis)'),
+       xaxt='n', 
+       ylim = c(-4, 10), 
+       col = 'blue', 
+       lwd = 3)
+  # lines(mzlb[, 'fed_funds'], col = 'blue', lwd = 3)
+  lines(mzlb[, 'est_cens_target_rate'], col = 'black', lwd = 3, lty = 'dashed')
+  lines(mzlb[, 'shadow_rate'], col = 'green', lwd = 3, lty = 'dotted')
+  lines(mzlb[, 'soma_hold']/500, col = 'red', lwd = 3, lty = 'twodash')
+  lines(rep(0, nrow(mzlb)), lwd = 1, col = 'black')
+  
+  axis(1, at = new_year_dates[seq(4, 32, by = 5)], 
+       labels = new_year_labels[seq(4, 32, by = 5)])
+  axis(4, at = seq(0, 10, by = 2), labels = seq(0, 10, by = 2)*500)
+  
+  
+  # Close pdf file to save figure.
+  dev.off()
+  
+}
+
+
+
 ################################################################################
 # End. 
 ################################################################################
-
-# # Correcting the calculation of auxiliary parameters. 
-# 
-# test_cens_probs <- c(0.2, 0.0)
-# est_pred_2nd_ap <- sum(c(-0.5, -0.25, 0)^2 *
-#                          c(test_cens_probs, 1-sum(test_cens_probs)))
-# 
-# est_pred_2nd_ap <- - est_pred_avg^2 + 
-#   sum(c(-0.5, -0.25, 0)^2 * 
-#         c(test_cens_probs, 1-sum(test_cens_probs)))
-# 
-# est_pred_2nd_ap <- sqrt(- est_pred_avg^2 + 
-#                           sum(c(-0.5, -0.25, 0)^2 * 
-#                                 c(test_cens_probs, 1-sum(test_cens_probs))))
-
 
