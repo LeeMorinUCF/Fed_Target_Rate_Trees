@@ -43,15 +43,16 @@
 # Clear workspace.
 rm(list=ls(all=TRUE))
 
-# Set working directory.
-# wd_path <- '/home/ec2-user/MZLB-II_revisions' # On AWS
-wd_path <- 'C:/Users/le279259/Documents/Research/MZLB-II/MZLB-II_revisions' # On Windows
-# wd_path <- '~/MZLB-II_revisions' # On business.ucf.edu
+# Set working directory to the folder containing the repo Fed_Target_Rate_Trees.
+wd_path <- '~/Research/MZLB-II/MZLB-II_revisions/Fed_Target_Rate_Trees'
 
 setwd(wd_path)
 
+# Set path for data.
+data_path <- 'submission/data'
+
 # Set path for saved figures.
-fig_path <- 'MZLB_figs'
+fig_path <- 'submission/figs'
 
 # Load libraries designed for nonstationary time series.
 # install.packages('urca')
@@ -72,16 +73,15 @@ library(rpart.plot)
 # Specify parameters for critical values.
 file_tag <- 'ZLBFedYields'
 cv_version <- 2
-folder_name <- 'MZLB_data'
 
 in_file_name <- sprintf('%s/%s%d.csv', 
-                         folder_name, file_tag, cv_version)
+                        data_path, file_tag, cv_version)
 
 # Load table of daily interest rates and ranges. 
 fed_rates <- read.csv(file = in_file_name)
 
-# Analyze and calculate discrete rate changes. 
 
+# Analyze and calculate discrete rate changes. 
 summary(fed_rates)
 head(fed_rates)
 tail(fed_rates)
@@ -313,10 +313,9 @@ table(as.integer(fed_monthly[, 'fed_jump_zlb']), useNA = 'ifany')
 # Specify parameters for critical values.
 file_tag <- 'MZLB_revised_'
 cv_version <- 1
-folder_name <- 'MZLB_data'
 
 in_file_name <- sprintf('%s/%s%d.csv', 
-                        folder_name, file_tag, cv_version)
+                        data_path, file_tag, cv_version)
 
 # Load table of daily interest rates and ranges. 
 mzlb <- read.csv(file = in_file_name)
@@ -404,6 +403,12 @@ n_var <- length(var_list)
 # Initial Inspections
 #--------------------------------------------------------------------------------
 
+# After each definition of var_name, 
+# run this block of code to plot the variable: 
+# plot(mzlb[, var_name], type = 'l', 
+#      main = sprintf('Plot of %s', var_name))
+# print(var_name)
+
 # To be replaced by the unemployment gap (still highly persistent).
 var_name <- 'nrou'
 var_name <- 'unemp'
@@ -426,13 +431,13 @@ var_name <- ''
 
 var_num <- 0
 
-
+# Run this block repeatedly to plot each variable in turn:
 var_num <- var_num +1
 var_name <- var_list[var_num]
 plot(mzlb[, var_name], type = 'l', 
      main = sprintf('Plot of %s', var_name))
 print(var_name)
-
+# Some variable appear nonstationary. 
 
 #--------------------------------------------------------------------------------
 # Unit root tests
@@ -516,7 +521,7 @@ stat_list <- as.character(ur_results[ur_results[, 'n_0_p'] <= 2 |
 ur_list <- as.character(ur_results[ur_results[, 'n_0_p'] <= 2 |
                                        ur_results[, 'd_5_p'] <= 2 |
                                        ur_results[, 'adf_p'] <= 0.05, 'var_name'])
-# To avoid false positives (negatives?) select based on the best test. 
+# To avoid false positives (negatives?) select based on the ADF test with lags. 
 ur_list <- ur_results[ur_results[, 'adf_p'] >= 0.05, 'var_name']
 
 
@@ -526,12 +531,14 @@ plot_list <- as.character(ur_list)
 
 var_num <- 0
 
+# Run this block repeatedly to plot each variable in turn:
 var_num <- var_num +1
 var_name <- plot_list[var_num]
 plot(mzlb[, var_name], type = 'l', 
      main = sprintf('Plot of %s', var_name))
 
-# SPX and volatility are ok as is. 
+# Comments:
+# SPX returns and volatility are ok as is. 
 # NROU has pronounced trend.
 # lab_mkt_cond looks stationary with high persistance. 
 # Infl is tolerable.
@@ -553,10 +560,6 @@ plot(mzlb[, var_name], type = 'l',
 #--------------------------------------------------------------------------------
 
 # To be replaced by the unemployment gap (still highly persistent).
-var_name <- 'nrou'
-var_name <- 'unemp'
-var_name <- 'unemp_sa'
-var_name <- 'unemp_ns'
 raw_unemp_var_list <- c('nrou', 'unemp', 'unemp_sa', 'unemp_ns')
 
 mzlb[, 'unemp_gap_1'] <- mzlb[, 'unemp'] - mzlb[, 'nrou']
@@ -573,6 +576,8 @@ new_year_labels <- substr(mzlb[new_year_dates, 'date'], 1,4)
 five_year_dates <- new_year_dates[seq(4, 32, by = 5)]
 five_year_labels <- new_year_labels[seq(4, 32, by = 5)]
 
+
+# Plot the new unemployment variable. 
 var_name <- 'unemp_gap_1'
 plot(mzlb[, var_name], type = 'l', 
      main = sprintf('Plot of %s', var_name), 
@@ -593,7 +598,7 @@ lines(rep(2, nrow(mzlb)), col = 'black', lty = 'dashed')
 # The unemployment gap gives a good indication of the recession in the ZLB period. 
 
 
-# A few other variables wil complete the picture, one the model is estimated. 
+# A few other variables wil complete the picture, once the model is estimated. 
 
 
 #--------------------------------------------------------------------------------
@@ -606,7 +611,7 @@ lines(rep(2, nrow(mzlb)), col = 'black', lty = 'dashed')
 # (both for consistency with yield curve and to avoid gaps).
 # Both 20 and 30 year issues have missing data: 
 # Impute from one to the other when missing (both are very similar). 
-# Replace with principal components of the yield curve. 
+# Replace interest rate series with principal components of the yield curve. 
 
 
 # Both 20 and 30 year issues have missing data: 
@@ -617,13 +622,15 @@ mzlb[is.na(mzlb[, 'tb20yr_cm']) |
 mzlb[is.na(mzlb[, 'tb30yr_cm']) | 
        mzlb[, 'tb30yr_cm'] == 0, 'tb30yr_cm'] <- NA
 
+# Plot the 20- and 30-year interest rates 
+# to verify similarity. 
 var_name_1 <- 'tb20yr_cm'
 var_name_2 <- 'tb30yr_cm'
 plot(mzlb[, var_name_1], type = 'l', 
      main = sprintf('Plot of %s and %s', var_name_1, var_name_2))
 lines(mzlb[, var_name_2], col = 'blue')
 
-# So similar it doesn't make much difference. 
+# They are so similar that it doesn't make much difference. 
 # Easiest to impute missing values from each series. 
 table(is.na(mzlb[, 'tb20yr_cm']), is.na(mzlb[, 'tb30yr_cm']))
 # Only the last observation is missing in common. 
@@ -653,7 +660,7 @@ mzlb[1:(nrow(mzlb)-1), c('yield_pc1', 'yield_pc2')] <-
   predict(yield_pca)[, 1:2]
 
 
-
+# Plot the first two principal components of the yield curve. 
 var_name_1 <- 'yield_pc1'
 var_name_2 <- 'yield_pc2'
 plot(mzlb[, var_name_1], type = 'l', 
@@ -683,6 +690,7 @@ for (var_name in diff_var_list) {
 # Inspect transformed variables. 
 var_num <- 0
 
+# Run repeatedly to plot each differenced variable in turn. 
 var_num <- var_num +1
 var_name <- sprintf('d_%s', diff_var_list[var_num])
 plot(mzlb[, var_name], type = 'l', 
@@ -736,7 +744,9 @@ summary(mzlb[incl_obsns, c(target_var, pred_var_list)])
 
 
 #--------------------------------------------------------------------------------
-# Repeat Estimation of rpart() on a sequence of Candidate Predictor Variables
+# Repeated Estimation of rpart() function (in the next script)
+# on a Sequence of Candidate Predictor Variables
+# Then dropped several that were close surrogates.
 #--------------------------------------------------------------------------------
 
 
@@ -868,12 +878,9 @@ pred_var_list <- c(trim_var_list,
 # Plot macroeconomic variables during ZLB period. 
 #--------------------------------------------------------------------------------
 
-fig_file_name <- sprintf('%s/Macro_vars%d.pdf', 
-                         fig_path, fig_version)
 
-# Open pdf file to save figure.
-# pdf(fig_file_name)
 
+# Plot the components one at a time for inspection. 
 plot(mzlb[, 'fed_funds'], type = 'l', 
      main = c('Key Macroeconomic Variables', 
               'during the Zero Lower Bound Episode'),
@@ -916,15 +923,87 @@ mtext('Leading Indicator', side = 4, line = -1, cex.lab = 1,las = 0)
 axis(4, at = seq(-2.5, 10, by = 2.5), labels = seq(-2.5, 10, by = 2.5) + 100)
 
 
-# Add liness to separate a recovery portion of the ZLB. 
+# Add lines to separate a recovery portion of the ZLB. 
 abline(v = 330, 
        col = 'black', lty = 'dashed')
 # Unemployment gap still above 0.67.
 lines(rep(0.67, nrow(mzlb)), col = 'black', lty = 'dashed')
 
 
-# Close pdf file to save figure.
-# dev.off()
+
+#--------------------------------------------------------------------------------
+# Ready to produce the publishable version. 
+#--------------------------------------------------------------------------------
+
+
+# Plot Figure 1 and output to the figs folder. 
+# Create two copies of each to ease 
+# building the pdf documents on different platforms. 
+fig_type_list <- c('pdf', 'eps')
+fig_num <- 1
+
+for (fig_type in fig_type_list) {
+  
+  # Extension depends on figure file format. 
+  fig_file_name <- sprintf('%s/Fig%d.%s', fig_path, fig_num, fig_type)
+  
+  
+  # Open the selected file. 
+  if (fig_type == 'pdf') {
+    # Open pdf file to save figure.
+    pdf(fig_file_name)
+  } else if (fig_type == 'eps') {
+    # Alternatively, open eps file to save figure.
+    postscript(fig_file_name)
+    # Required for submission of manuscript. 
+  }
+  
+  # Plot the components one at a time for inspection. 
+  plot(mzlb[, 'fed_funds'], type = 'l', 
+       # main = c('Key Macroeconomic Variables', 
+       #          'during the Zero Lower Bound Episode'),
+       xlab = 'Date', 
+       ylab = 'Percent (Annual)', 
+       # cex.main = 1.5, 
+       cex.lab = 1.0,
+       # cex.lab = 1.5,  
+       xaxt ='n', 
+       lwd = 3, col = 'blue', 
+       ylim = c(-4, 10))
+  lines(rep(0, nrow(mzlb)), col = 'black')
+  axis(1, at = five_year_dates, 
+       labels = five_year_labels)
+  # Olverlay the  Unemployment gap. 
+  lines(mzlb[, 'unemp_gap_1'], col = 'green', lwd = 3, lty = 'dashed')
+  # Add the cutoff at 2 to indicate (most of) ZLB.
+  lines(rep(2, nrow(mzlb)), col = 'black', lty = 'dashed')
+  # The unemployment gap tells quite a lot 
+  # about the recession in the ZLB period. 
+  # Use vertical lines to denote the ZLB period.  
+  abline(v = which(cumsum(mzlb[, 'zlb_ind']) == 1), 
+         col = 'black', lty = 'dashed')
+  abline(v = which(cumsum(mzlb[, 'zlb_ind']) == max(cumsum(mzlb[, 'zlb_ind'])))[1], 
+         col = 'black', lty = 'dashed')
+  # A few other variables complete the picture. 
+  lines(mzlb[, 'lead_ind_adj'] - 100, col = 'red', lwd = 3, lty = 'dotted')
+  mtext('Leading Indicator', side = 4, line = -1, cex.lab = 1.0,las = 0)
+  axis(4, at = seq(-2.5, 10, by = 2.5), labels = seq(-2.5, 10, by = 2.5) + 100)
+  # Add lines to separate a recovery portion of the ZLB. 
+  abline(v = 330, 
+         col = 'black', lty = 'dashed')
+  # Unemployment gap still above 0.67.
+  lines(rep(0.67, nrow(mzlb)), col = 'black', lty = 'dashed')
+  
+  
+  # Close pdf file to save figure.
+  dev.off()
+  
+  
+}
+
+#--------------------------------------------------------------------------------
+
+
 
 
 ################################################################################
